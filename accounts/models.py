@@ -162,7 +162,7 @@ class Customer(AbstractBaseUser):
     name = models.CharField(max_length=255)
     phone_number = models.CharField(max_length=20, unique=True)
     email = models.EmailField(unique=True, null=True, blank=True)  # اختياري
-
+    device_token = models.CharField(max_length=255, null=True, blank=True)
     # عشان نعرف لو رقم التليفون اتتأكد
     is_phone_verified = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
@@ -233,7 +233,7 @@ class Provider(AbstractBaseUser):
     phone_number = models.CharField(max_length=20, unique=True)
     email = models.EmailField(unique=True, null=True, blank=True)
     address = models.TextField(blank=True)
-
+    device_token = models.CharField(max_length=255, null=True, blank=True)
     specialization = models.ForeignKey(
         'Specialization',
         on_delete=models.SET_NULL,

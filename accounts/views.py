@@ -167,7 +167,7 @@ class VerifyOTPView(APIView):
         phone_number = serializer.validated_data['phone_number']
         user_type = serializer.validated_data['user_type']
         otp = serializer.validated_data['otp']
-
+        device_token = request.data.get('device_token')
         # ماركت الـ OTP كـ used
         otp.is_used = True
         otp.save(update_fields=['is_used'])
@@ -207,6 +207,9 @@ class VerifyOTPView(APIView):
             tokens = get_tokens_for_user(user, 'provider')
             user_data = ProviderSerializer(user).data
 
+        if device_token:
+            user.device_token = device_token
+            user.save(update_fields=['device_token'])
         return Response({
             'tokens': tokens,
             'user': user_data
@@ -579,7 +582,7 @@ class BiometricLoginView(APIView):
                 {'error': 'Account not found or inactive.'},
                 status=status.HTTP_404_NOT_FOUND
             )
-
+        device_token = request.data.get('device_token')
         # آبديت last_used
         biometric.last_used = timezone.now()
         biometric.save(update_fields=['last_used'])
@@ -594,6 +597,10 @@ class BiometricLoginView(APIView):
         else:
             user_data = ProviderSerializer(user).data
 
+        if device_token:
+            user.device_token = device_token
+            user.save(update_fields=['device_token'])
+            
         return Response({
             'tokens': tokens,
             'user': user_data
