@@ -1,0 +1,1 @@
+web: gunicorn mosaed.wsgi --log-file -
