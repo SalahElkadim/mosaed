@@ -76,8 +76,9 @@ AUTHENTICATION_BACKENDS = [
 ]
 # CORS
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",    # React / Next.js
+    "http://localhost:3000",
     "http://localhost:8080",
+    "https://mosaed-production.up.railway.app",  
 ]
 
 ROOT_URLCONF = 'mosaed.urls'
