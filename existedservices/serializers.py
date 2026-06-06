@@ -77,7 +77,11 @@ class ExistedServiceDetailSerializer(serializers.ModelSerializer):
 
 class ExistedServiceAdminListSerializer(serializers.ModelSerializer):
     attributes_count = serializers.IntegerField(source='attributes.count', read_only=True)
-    specialization = SpecializationSerializer(read_only=True)  # ← أضف السطر ده
+    specialization = serializers.PrimaryKeyRelatedField(
+    queryset=Specialization.objects.all(),
+    required=False,
+    allow_null=True
+)  # ← أضف السطر ده
     warranty   = WarrantySerializer(read_only=True)
     class Meta:
         model  = ExistedService
@@ -90,7 +94,11 @@ class ExistedServiceAdminListSerializer(serializers.ModelSerializer):
 class ExistedServiceAdminDetailSerializer(serializers.ModelSerializer):
     """للأدمن - تفاصيل كاملة"""
     attributes = ServiceAttributeAdminSerializer(many=True, read_only=True)
-    specialization = SpecializationSerializer(read_only=True)
+    specialization = serializers.PrimaryKeyRelatedField(
+    queryset=Specialization.objects.all(),
+    required=False,
+    allow_null=True
+)
     class Meta:
         model  = ExistedService
         fields = ['id', 'title', 'image','specialization', 'details', 'date', 'is_active', 'attributes', 'created_at', 'updated_at', 'warranty']
@@ -98,15 +106,42 @@ class ExistedServiceAdminDetailSerializer(serializers.ModelSerializer):
 
 
 class ExistedServiceWriteSerializer(serializers.ModelSerializer):
-    specialization = SpecializationSerializer(read_only=True)
+    warranty = WarrantyWriteSerializer(required=False, allow_null=True)
+
     class Meta:
         model  = ExistedService
-        fields = ['title', 'image', 'details', 'date', 'is_active','specialization', 'warranty']
+        fields = ['title', 'image', 'details', 'date', 'is_active', 'specialization', 'warranty']
 
     def validate_title(self, value):
         if not value.strip():
             raise serializers.ValidationError("Title cannot be empty.")
         return value.strip()
+
+    def create(self, validated_data):
+        warranty_data = validated_data.pop('warranty', None)
+        service = ExistedService.objects.create(**validated_data)
+        if warranty_data:
+            Warranty.objects.create(service=service, **warranty_data)
+        return service
+
+    def update(self, instance, validated_data):
+        warranty_data = validated_data.pop('warranty', None)
+
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        if warranty_data is None:
+            # لو بعت warranty: null → احذف الضمان لو موجود
+            if hasattr(instance, 'warranty'):
+                instance.warranty.delete()
+        else:
+            Warranty.objects.update_or_create(
+                service=instance,
+                defaults=warranty_data
+            )
+
+        return instance
 
 
 # ==================== BOOKING ITEM SERIALIZERS ====================

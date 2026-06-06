@@ -32,6 +32,8 @@ INSTALLED_APPS = [
     'accounts',
     'existedservices.apps.ServicesConfig',
     'custom_services',
+    'django_celery_beat',
+
 ]
 
 MIDDLEWARE = [
@@ -156,3 +158,9 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 MSEGAT_USERNAME = os.getenv('MSEGAT_USERNAME')
 MSEGAT_API_KEY = os.getenv('MSEGAT_API_KEY')
 MSEGAT_SENDER = os.getenv('MSEGAT_SENDER', default='OTP')  # OTP للمجاني
+
+
+CELERY_BROKER_URL = os.environ.get('REDIS_URL')
+CELERY_RESULT_BACKEND = os.environ.get('REDIS_URL')
+CELERY_TIMEZONE = 'Africa/Cairo'
+CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'

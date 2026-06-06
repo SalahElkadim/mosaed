@@ -103,8 +103,8 @@ class CustomerUpdateSerializer(serializers.ModelSerializer):
 class ProviderRegisterSerializer(serializers.ModelSerializer):
     class Meta:
         model = Provider
-        fields = ['name', 'phone_number', 'email', 'address',
-                  'city', 'district', 'specialization',
+        fields = ['name', 'phone_number', 'email', 
+                  'specialization',
                   'national_id', 'commercial_registration', 'contract_image']
 
     def validate_phone_number(self, value):
@@ -122,7 +122,7 @@ class ProviderRegisterSerializer(serializers.ModelSerializer):
 class ProviderAdminUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Provider
-        fields = ['name', 'email', 'address', 'city', 
+        fields = ['name', 'email', 'city', 
                   'district', 'is_approved', 'is_active']
 
 from rest_framework import serializers
@@ -176,7 +176,7 @@ class ProviderSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Provider
-        fields = ['id', 'name', 'phone_number', 'email', 'address',
+        fields = ['id', 'name', 'phone_number', 'email', 
                 'specialization', 'addresses',                        # ← address القديم وعناوين جديدة
                 'total_services', 'average_rating', 'total_reviews',
                 'is_phone_verified', 'is_approved', 'is_active',
@@ -185,8 +185,7 @@ class ProviderSerializer(serializers.ModelSerializer):
 class ProviderUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Provider
-        fields = ['name', 'email', 'address']    # ← شلنا city و district
-
+        fields = ['name', 'email', ]    
     def validate_email(self, value):
         qs = Provider.objects.filter(email=value)
         if self.instance:
@@ -201,7 +200,7 @@ class ProviderAdminSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Provider
-        fields = ['id', 'name', 'phone_number', 'email', 'address',
+        fields = ['id', 'name', 'phone_number', 'email', 
                   'specialization', 'addresses',                        # ← عدلناه
                   'national_id', 'commercial_registration', 'contract_image',
                   'wallet_balance', 'total_services', 'average_rating', 'total_reviews',
@@ -354,7 +353,8 @@ class CityWriteSerializer(serializers.ModelSerializer):
 class RegionWriteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Region
-        fields = ['name', 'city', 'is_active']
+        fields = ['id', 'name', 'city', 'is_active']  # ← ضيف 'id'
+        read_only_fields = ['id']
 
     def validate(self, attrs):
         city = attrs.get('city')

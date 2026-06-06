@@ -600,7 +600,7 @@ class BiometricLoginView(APIView):
         if device_token:
             user.device_token = device_token
             user.save(update_fields=['device_token'])
-            
+
         return Response({
             'tokens': tokens,
             'user': user_data
@@ -1235,5 +1235,44 @@ class ProviderAddressDetailView(APIView):
         address = self.get_object(request, address_id)
         if not address:
             return Response({'error': 'Address not found.'}, status=404)
+        address.delete()
+        return Response({'message': 'Address deleted.'}, status=204)
+    
+# في views.py
+class AdminProviderAddressView(APIView):
+    permission_classes = [IsAdminUser]
+
+    def post(self, request, provider_id):
+        try:
+            provider = Provider.objects.get(id=provider_id)
+        except Provider.DoesNotExist:
+            return Response({'error': 'Provider not found.'}, status=404)
+        
+        serializer = ProviderAddressSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(provider=provider)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class AdminProviderAddressDetailView(APIView):
+    permission_classes = [IsAdminUser]
+
+    def patch(self, request, provider_id, address_id):
+        try:
+            address = ProviderAddress.objects.get(id=address_id, provider_id=provider_id)
+        except ProviderAddress.DoesNotExist:
+            return Response({'error': 'Address not found.'}, status=404)
+        
+        serializer = ProviderAddressSerializer(address, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
+
+    def delete(self, request, provider_id, address_id):
+        try:
+            address = ProviderAddress.objects.get(id=address_id, provider_id=provider_id)
+        except ProviderAddress.DoesNotExist:
+            return Response({'error': 'Address not found.'}, status=404)
+        
         address.delete()
         return Response({'message': 'Address deleted.'}, status=204)

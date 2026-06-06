@@ -232,7 +232,6 @@ class Provider(AbstractBaseUser):
     name = models.CharField(max_length=255)
     phone_number = models.CharField(max_length=20, unique=True)
     email = models.EmailField(unique=True, null=True, blank=True)
-    address = models.TextField(blank=True)
     device_token = models.CharField(max_length=255, null=True, blank=True)
     specialization = models.ForeignKey(
         'Specialization',

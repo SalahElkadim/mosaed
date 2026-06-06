@@ -2,7 +2,6 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAdminUser
-
 from accounts.permissions import IsCustomer,IsProviderOrAdmin   
 from .models import ExistedService, ServiceAttribute, Booking, ExistedService, ServiceReview, ServiceProvider, Warranty
 from .serializers import (
@@ -793,3 +792,43 @@ class AdminCouponDetailView(APIView):
             return Response({'error': 'Coupon not found.'}, status=status.HTTP_404_NOT_FOUND)
         coupon.delete()
         return Response({'message': 'Coupon deleted.'}, status=status.HTTP_200_OK)
+    
+
+class AdminAvailableProvidersForServiceView(APIView):
+    """
+    GET /admin/services/<service_id>/available-providers/
+    يجيب الفنيين اللي عندهم نفس تخصص الخدمة ومش متعينين فيها
+    """
+    permission_classes = [IsAdminUser]
+
+    def get(self, request, service_id):
+        try:
+            service = ExistedService.objects.get(id=service_id)
+        except ExistedService.DoesNotExist:
+            return Response({'error': 'Service not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        # الفنيين اللي متعينين بالفعل في الخدمة دي
+        assigned_ids = ServiceProvider.objects.filter(
+            service=service
+        ).values_list('provider_id', flat=True)
+
+        from accounts.models import Provider
+        providers = Provider.objects.filter(
+            is_active=True,
+            is_approved=True,
+        ).exclude(id__in=assigned_ids)
+
+        # لو الخدمة عندها تخصص، فلتر بيه
+        if service.specialization:
+            providers = providers.filter(specialization=service.specialization)
+
+        data = [
+            {
+                'id': str(p.id),
+                'name': p.name,
+                'phone_number': p.phone_number,
+                'specialization': p.specialization.name if p.specialization else None,
+            }
+            for p in providers
+        ]
+        return Response(data)

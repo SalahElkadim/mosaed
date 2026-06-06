@@ -23,7 +23,7 @@ from .views import (
     ProviderCompletionFormView,
     ProviderCompletionMediaView,
     CouponValidateView,
-    AdminCouponListView,AdminCouponDetailView
+    AdminCouponListView,AdminCouponDetailView,AdminAvailableProvidersForServiceView
 )
 
 urlpatterns = [
@@ -78,5 +78,7 @@ urlpatterns = [
      # Admin
      path('admin/coupons/',             AdminCouponListView.as_view()),
      path('admin/coupons/<uuid:coupon_id>/', AdminCouponDetailView.as_view()),
+     path('admin/services/<uuid:service_id>/available-providers/', 
+     AdminAvailableProvidersForServiceView.as_view()),
     
 ]
