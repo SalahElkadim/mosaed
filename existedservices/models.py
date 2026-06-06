@@ -78,6 +78,9 @@ class ServiceAttribute(models.Model):
     name      = models.CharField(max_length=255)   # عزل فوم / عزل مازوت
     details   = models.TextField(blank=True)        # تفاصيل خاصة بالـ attribute
     unit_cost = models.DecimalField(max_digits=10, decimal_places=2)
+    # ← أضف الحقلين دول
+    unit_name     = models.CharField(max_length=100, blank=True, default='')   # متر مربع
+    quantity_name = models.CharField(max_length=100, blank=True, default='')   # المساحة
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

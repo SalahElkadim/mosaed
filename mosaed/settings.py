@@ -78,7 +78,7 @@ AUTHENTICATION_BACKENDS = [
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://localhost:8080",
-    "https://mosaeddashboard-production.up.railway.app/",  
+    "https://mosaeddashboard-production.up.railway.app",  
 ]
 
 ROOT_URLCONF = 'mosaed.urls'

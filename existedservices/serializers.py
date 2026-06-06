@@ -30,7 +30,7 @@ class ServiceAttributeSerializer(serializers.ModelSerializer):
     """للكلاينت"""
     class Meta:
         model  = ServiceAttribute
-        fields = ['id', 'name', 'details', 'unit_cost']
+        fields = ['id', 'name', 'details', 'unit_cost', 'unit_name', 'quantity_name']
         read_only_fields = ['id']
 
 
@@ -38,14 +38,14 @@ class ServiceAttributeAdminSerializer(serializers.ModelSerializer):
     """للأدمن"""
     class Meta:
         model  = ServiceAttribute
-        fields = ['id', 'name', 'details', 'unit_cost', 'created_at', 'updated_at']
+        fields = ['id', 'name', 'details', 'unit_cost', 'unit_name', 'quantity_name', 'created_at', 'updated_at']
         read_only_fields = ['id', 'created_at', 'updated_at']
 
 
 class ServiceAttributeWriteSerializer(serializers.ModelSerializer):
     class Meta:
         model  = ServiceAttribute
-        fields = ['name', 'details', 'unit_cost']
+        fields = ['name', 'details', 'unit_cost', 'unit_name', 'quantity_name']
 
     def validate_unit_cost(self, value):
         if value <= 0:
