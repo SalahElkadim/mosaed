@@ -11,7 +11,7 @@ from .views import (
     CustomerAddressView, CustomerAddressDetailView, ReviewCreateView,CityListView,ProviderAddressView,CityDetailView,
     ProviderReviewsView,RegionDetailView,RegionListView,
     ReviewDeleteView, ReviewUpdateView,AdminCustomerDetailView,AdminCustomerListView,ProviderAddressDetailView,
-    ProviderReviewsDeleteAllView,PreviousWorkListCreateView,AdminProviderAddressDetailView, PreviousWorkDetailView, SpecializationListView,AdminProviderAddressView, SpecializationDetailView,
+    ProviderReviewsDeleteAllView,PreviousWorkListCreateView,AdminProviderAddressDetailView, PreviousWorkDetailView,NearbyProvidersView, SpecializationListView,AdminProviderAddressView, SpecializationDetailView,
 )
 
 urlpatterns = [
@@ -67,5 +67,7 @@ urlpatterns = [
     # في urls.py أضيف:
     path('admin/providers/<uuid:provider_id>/addresses/', AdminProviderAddressView.as_view()),
     path('admin/providers/<uuid:provider_id>/addresses/<uuid:address_id>/', AdminProviderAddressDetailView.as_view()),
+    path('providers/nearby/', NearbyProvidersView.as_view(), name='nearby-providers'),
+
 
 ]

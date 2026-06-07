@@ -1276,3 +1276,65 @@ class AdminProviderAddressDetailView(APIView):
         
         address.delete()
         return Response({'message': 'Address deleted.'}, status=204)
+    
+from math import radians, sin, cos, sqrt, atan2
+
+class NearbyProvidersView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        # جيب الـ params من الـ request
+        try:
+            user_lat = float(request.query_params.get('lat'))
+            user_lng = float(request.query_params.get('lng'))
+            radius   = float(request.query_params.get('radius', 10))  # default 10km
+        except (TypeError, ValueError):
+            return Response(
+                {'error': 'lat and lng are required as valid numbers.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # جيب كل الـ providers اللي عندهم عنوان بـ lat/lng
+        addresses = ProviderAddress.objects.filter(
+            lat__isnull=False,
+            lng__isnull=False,
+            provider__is_active=True,
+            provider__is_approved=True,
+        ).select_related('provider')
+
+        results = []
+        for address in addresses:
+            distance = self._haversine(
+                user_lat, user_lng,
+                float(address.lat), float(address.lng)
+            )
+            if distance <= radius:
+                results.append({
+                    'provider_id':    address.provider.id,
+                    'provider_name':  address.provider.name,
+                    'specialization': address.provider.specialization.name if address.provider.specialization else None,
+                    'average_rating': address.provider.average_rating,
+                    'total_reviews':  address.provider.total_reviews,
+                    'distance_km':    round(distance, 2),
+                    'address': {
+                        'city':    address.city.name if address.city else None,
+                        'region':  address.region.name if address.region else None,
+                        'district': address.district,
+                        'lat':     address.lat,
+                        'lng':     address.lng,
+                    }
+                })
+
+        # رتب من الأقرب للأبعد
+        results.sort(key=lambda x: x['distance_km'])
+
+        return Response(results, status=status.HTTP_200_OK)
+
+    def _haversine(self, lat1, lng1, lat2, lng2):
+        """بيحسب المسافة بالكيلومتر بين نقطتين"""
+        R = 6371  # نصف قطر الأرض بالكيلومتر
+        lat1, lng1, lat2, lng2 = map(radians, [lat1, lng1, lat2, lng2])
+        dlat = lat2 - lat1
+        dlng = lng2 - lng1
+        a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlng/2)**2
+        return R * 2 * atan2(sqrt(a), sqrt(1 - a))

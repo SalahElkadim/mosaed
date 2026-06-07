@@ -61,7 +61,7 @@ class CustomerAddressSerializer(serializers.ModelSerializer):
     class Meta:
         model = CustomerAddress
         fields = ['id', 'city', 'city_name', 'region', 'region_name',
-                  'district', 'street', 'building_no', 'floor_no',
+                  'district', 'street', 'building_no', 'lat', 'lng', 'floor_no',
                   'apartment_no', 'label', 'is_default', 'created_at']
         read_only_fields = ['id', 'created_at']
 
@@ -156,7 +156,7 @@ class ProviderAddressSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProviderAddress
         fields = ['id', 'city', 'city_name', 'region', 'region_name',
-                  'district', 'street', 'building_no',          # ← district أضفناه
+                  'district', 'street', 'lat', 'lng', 'building_no',          # ← district أضفناه
                   'label', 'is_default', 'created_at']
         read_only_fields = ['id', 'created_at']
 

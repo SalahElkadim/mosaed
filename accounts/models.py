@@ -201,6 +201,15 @@ class CustomerAddress(models.Model):
         null=True,
         related_name='customer_addresses'
     )
+    # في CustomerAddress
+    lat = models.DecimalField(
+        max_digits=9, decimal_places=6,
+        null=True, blank=True
+    )
+    lng = models.DecimalField(
+        max_digits=9, decimal_places=6,
+        null=True, blank=True
+    )
     district = models.CharField(max_length=100)
     street = models.CharField(max_length=255)
     building_no = models.CharField(max_length=20, blank=True)
@@ -289,6 +298,14 @@ class ProviderAddress(models.Model):
         on_delete=models.SET_NULL,
         null=True,
         related_name='provider_addresses'
+    )
+    lat = models.DecimalField(
+        max_digits=9, decimal_places=6,
+        null=True, blank=True
+    )
+    lng = models.DecimalField(
+        max_digits=9, decimal_places=6,
+        null=True, blank=True
     )
     district = models.CharField(max_length=100)        # ← أضفناه
     street = models.CharField(max_length=255, blank=True)
