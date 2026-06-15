@@ -8,7 +8,7 @@ from django.contrib.auth import authenticate
 from django.utils import timezone
 from rest_framework_simplejwt.tokens import RefreshToken
 import random
-from .permissions import IsCustomerOrAdmin  # Add this import at the top if not already imported
+from .permissions import IsCustomerOrAdmin,IsProviderOrAdmin # Add this import at the top if not already imported
 from utils.cloudinary import upload_image, upload_video
 from .models import Admin, Customer, Provider, OTPVerification, BiometricToken, CustomerAddress,ProviderAddress,City,Region
 from .serializers import (
@@ -917,12 +917,12 @@ class PreviousWorkListCreateView(APIView):
 
     def get_permissions(self):
         if self.request.method == 'POST':
-            return [IsProvider()]
+            return [IsProviderOrAdmin()]
         return []  # GET متاح للكل
 
     def get(self, request, provider_id):
         try:
-            provider = Provider.objects.get(id=provider_id, is_active=True)
+            provider = Provider.objects.get(id=provider_id)
         except Provider.DoesNotExist:
             return Response(
                 {'error': 'Provider not found.'},
@@ -936,34 +936,33 @@ class PreviousWorkListCreateView(APIView):
         )
 
     def post(self, request):
-        if 'media' not in request.FILES:
-            return Response(
-                {'error': 'media file is required.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        media_type = request.data.get('media_type')
-        if media_type not in ('image', 'video'):
-            return Response(
-                {'error': 'media_type must be image or video.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        if media_type == 'video':
-            result = upload_video(request.FILES['media'], folder="previous_works")
-            media_url     = result['url']
-            thumbnail_url = result['thumbnail']
+        user_type = getattr(request.auth, 'payload', {}).get('user_type')
+        
+        # تحديد الـ provider
+        if user_type == 'admin':
+            provider_id = request.data.get('provider')
+            if not provider_id:
+                return Response({'error': 'provider id is required.'}, status=400)
+            try:
+                provider = Provider.objects.get(id=provider_id)
+            except Provider.DoesNotExist:
+                return Response({'error': 'Provider not found.'}, status=404)
         else:
-            media_url     = upload_image(request.FILES['media'], folder="previous_works")
-            thumbnail_url = None
+            provider = request.user
 
-        data = request.data.copy()
-        data['media_url']     = media_url
-        data['thumbnail_url'] = thumbnail_url
+        # الفرونت بيرفع على Cloudinary وبيبعت الـ URL جاهز
+        media_url = request.data.get('media_url')
+        media_type = request.data.get('media_type')
+        
+        if not media_url:
+            return Response({'error': 'media_url is required.'}, status=400)
+        
+        if media_type not in ('image', 'video'):
+            return Response({'error': 'media_type must be image or video.'}, status=400)
 
-        serializer = PreviousWorkSerializer(data=data)
+        serializer = PreviousWorkSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        serializer.save(provider=request.user)
+        serializer.save(provider=provider)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
@@ -1065,7 +1064,7 @@ class ProviderReviewsView(APIView):
 
     def get(self, request, provider_id):
         try:
-            provider = Provider.objects.get(id=provider_id, is_active=True)
+            provider = Provider.objects.get(id=provider_id)
         except Provider.DoesNotExist:
             return Response({'error': 'Provider not found.'}, status=404)
 
