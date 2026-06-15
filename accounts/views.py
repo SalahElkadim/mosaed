@@ -9,7 +9,7 @@ from django.utils import timezone
 from rest_framework_simplejwt.tokens import RefreshToken
 import random
 from .permissions import IsCustomerOrAdmin  # Add this import at the top if not already imported
-
+from utils.cloudinary import upload_image, upload_video
 from .models import Admin, Customer, Provider, OTPVerification, BiometricToken, CustomerAddress,ProviderAddress,City,Region
 from .serializers import (
     AdminLoginSerializer, AdminSerializer,
@@ -231,16 +231,26 @@ class CustomerRegisterView(APIView):
             status=status.HTTP_201_CREATED
         )
 
-
 class ProviderRegisterView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        serializer = ProviderRegisterSerializer(data=request.data)
+        # ارفع الـ contract_image لو موجود
+        contract_image_url = None
+        if 'contract_image' in request.FILES:
+            contract_image_url = upload_image(
+                request.FILES['contract_image'],
+                folder="contracts"
+            )
+
+        data = request.data.copy()
+        if contract_image_url:
+            data['contract_image'] = contract_image_url
+
+        serializer = ProviderRegisterSerializer(data=data)
         serializer.is_valid(raise_exception=True)
         provider = serializer.save()
 
-        # لو الطلب جاي من أدمن، mark كـ verified تلقائياً
         user_type = getattr(request.auth, 'payload', {}).get('user_type')
         if user_type == 'admin':
             provider.is_phone_verified = True
@@ -250,8 +260,7 @@ class ProviderRegisterView(APIView):
             {'message': 'Registration submitted. Pending admin approval.'},
             status=status.HTTP_201_CREATED
         )
-
-
+    
 # ==================== LOGOUT ====================
 
 class LogoutView(APIView):
@@ -927,7 +936,32 @@ class PreviousWorkListCreateView(APIView):
         )
 
     def post(self, request):
-        serializer = PreviousWorkSerializer(data=request.data)
+        if 'media' not in request.FILES:
+            return Response(
+                {'error': 'media file is required.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        media_type = request.data.get('media_type')
+        if media_type not in ('image', 'video'):
+            return Response(
+                {'error': 'media_type must be image or video.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if media_type == 'video':
+            result = upload_video(request.FILES['media'], folder="previous_works")
+            media_url     = result['url']
+            thumbnail_url = result['thumbnail']
+        else:
+            media_url     = upload_image(request.FILES['media'], folder="previous_works")
+            thumbnail_url = None
+
+        data = request.data.copy()
+        data['media_url']     = media_url
+        data['thumbnail_url'] = thumbnail_url
+
+        serializer = PreviousWorkSerializer(data=data)
         serializer.is_valid(raise_exception=True)
         serializer.save(provider=request.user)
         return Response(serializer.data, status=status.HTTP_201_CREATED)

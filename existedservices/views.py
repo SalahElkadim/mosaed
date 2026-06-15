@@ -4,6 +4,7 @@ from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAdminUser
 from accounts.permissions import IsCustomer,IsProviderOrAdmin   
 from .models import ExistedService, ServiceAttribute, Booking, ExistedService, ServiceReview, ServiceProvider, Warranty
+from utils.cloudinary import upload_image, upload_video
 from .serializers import (
     # Service
     ExistedServiceListSerializer,
@@ -70,7 +71,15 @@ class AdminExistedServiceListView(APIView):
         return Response(ExistedServiceAdminListSerializer(services, many=True).data)
 
     def post(self, request):
-        serializer = ExistedServiceWriteSerializer(data=request.data)
+        data = request.data.copy()
+
+        if 'image' in request.FILES:
+            data['image'] = upload_image(
+                request.FILES['image'],
+                folder="services"
+            )
+
+        serializer = ExistedServiceWriteSerializer(data=data)
         serializer.is_valid(raise_exception=True)
         service = serializer.save()
         return Response(
@@ -98,7 +107,16 @@ class AdminExistedServiceDetailView(APIView):
         service = self.get_object(service_id)
         if not service:
             return Response({'error': 'Service not found.'}, status=status.HTTP_404_NOT_FOUND)
-        serializer = ExistedServiceWriteSerializer(service, data=request.data, partial=True)
+
+        data = request.data.copy()
+
+        if 'image' in request.FILES:
+            data['image'] = upload_image(
+                request.FILES['image'],
+                folder="services"
+            )
+
+        serializer = ExistedServiceWriteSerializer(service, data=data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(ExistedServiceAdminDetailSerializer(service).data)
@@ -659,7 +677,33 @@ class ProviderCompletionMediaView(APIView):
                 {'error': 'Cannot add media to a finished form.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        serializer = CompletionMediaWriteSerializer(data=request.data)
+
+        if 'media' not in request.FILES:
+            return Response(
+                {'error': 'media file is required.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        media_type = request.data.get('media_type')
+        if media_type not in ('image', 'video'):
+            return Response(
+                {'error': 'media_type must be image or video.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if media_type == 'video':
+            result = upload_video(request.FILES['media'], folder="completion_media")
+            media_url     = result['url']
+            thumbnail_url = result['thumbnail']
+        else:
+            media_url     = upload_image(request.FILES['media'], folder="completion_media")
+            thumbnail_url = None
+
+        data = request.data.copy()
+        data['media_url']     = media_url
+        data['thumbnail_url'] = thumbnail_url
+
+        serializer = CompletionMediaWriteSerializer(data=data)
         serializer.is_valid(raise_exception=True)
         media = serializer.save(form=form)
         return Response(
