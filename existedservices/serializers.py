@@ -59,7 +59,7 @@ class ExistedServiceListSerializer(serializers.ModelSerializer):
     """للكلاينت - قائمة خفيفة"""
     class Meta:
         model  = ExistedService
-        fields = ['id', 'title', 'image', 'date', 'is_active']
+        fields = ['id', 'title', 'image', 'date', 'is_active', 'visit_cost']
         read_only_fields = ['id']
 
 
@@ -71,7 +71,7 @@ class ExistedServiceDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model  = ExistedService
         fields = ['id', 'title', 'image', 'details', 'date', 
-                  'is_active', 'attributes', 'warranty']     # ← أضف warranty
+                  'is_active', 'attributes', 'warranty', 'visit_cost']     # ← أضف warranty
         read_only_fields = ['id']
 
 
@@ -87,7 +87,7 @@ class ExistedServiceAdminListSerializer(serializers.ModelSerializer):
         model  = ExistedService
         fields = ['id', 'title', 'image', 'date', 'is_active', 
                   'attributes_count', 'specialization',  # ← أضفه هنا
-                  'created_at', 'updated_at', 'warranty']
+                  'created_at', 'updated_at', 'warranty', 'visit_cost']
         read_only_fields = ['id', 'created_at', 'updated_at']
 
 
@@ -101,7 +101,7 @@ class ExistedServiceAdminDetailSerializer(serializers.ModelSerializer):
 )
     class Meta:
         model  = ExistedService
-        fields = ['id', 'title', 'image','specialization', 'details', 'date', 'is_active', 'attributes', 'created_at', 'updated_at', 'warranty']
+        fields = ['id', 'title', 'image','specialization', 'details', 'date', 'is_active', 'attributes', 'created_at', 'updated_at', 'warranty', 'visit_cost']
         read_only_fields = ['id', 'created_at', 'updated_at']
 
 
@@ -110,7 +110,7 @@ class ExistedServiceWriteSerializer(serializers.ModelSerializer):
 
     class Meta:
         model  = ExistedService
-        fields = ['title', 'image', 'details', 'date', 'is_active', 'specialization', 'warranty']
+        fields = ['title', 'image', 'details', 'date', 'is_active', 'specialization', 'warranty', 'visit_cost']
 
     def validate_title(self, value):
         if not value.strip():
