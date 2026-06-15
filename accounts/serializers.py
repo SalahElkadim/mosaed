@@ -185,7 +185,7 @@ class ProviderSerializer(serializers.ModelSerializer):
 class ProviderUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Provider
-        fields = ['name', 'email', ]    
+        fields = ['name', 'email', 'contract_image' ]    
     def validate_email(self, value):
         qs = Provider.objects.filter(email=value)
         if self.instance:
