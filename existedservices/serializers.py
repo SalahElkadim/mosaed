@@ -240,6 +240,11 @@ class BookingCreateSerializer(serializers.Serializer):
 class BookingSerializer(serializers.ModelSerializer):
     items          = BookingItemSerializer(many=True, read_only=True)
     service_title  = serializers.CharField(source='service.title', read_only=True)
+    service_visit_cost = serializers.DecimalField(  # ← جديد
+        source='service.visit_cost', 
+        max_digits=10, decimal_places=2, 
+        read_only=True, allow_null=True
+    )
     provider_name  = serializers.CharField(source='provider.name', read_only=True)
     provider_phone = serializers.CharField(source='provider.phone_number', read_only=True)
     address        = CustomerAddressSerializer(read_only=True)
@@ -249,7 +254,7 @@ class BookingSerializer(serializers.ModelSerializer):
         model  = Booking
         fields = [
             'id', 'service_title', 'address', 'scheduled_date',
-            'notes', 'status', 'total_cost',
+            'notes', 'status', 'total_cost',"service_visit_cost",
             'coupon_code', 'discount_amount', 'final_cost',   # ← جديد
             'items', 'created_at', 'provider_name', 'provider_phone'
         ]
@@ -269,6 +274,11 @@ class BookingCancelSerializer(serializers.Serializer):
 class BookingAdminSerializer(serializers.ModelSerializer):
     items          = BookingItemSerializer(many=True, read_only=True)
     service_title  = serializers.CharField(source='service.title', read_only=True)
+    service_visit_cost = serializers.DecimalField(  # ← جديد
+        source='service.visit_cost',
+        max_digits=10, decimal_places=2,
+        read_only=True, allow_null=True
+    )
     customer_name  = serializers.CharField(source='customer.name', read_only=True)
     customer_phone = serializers.CharField(source='customer.phone_number', read_only=True)
     provider_name  = serializers.CharField(source='provider.name', read_only=True)
@@ -279,7 +289,7 @@ class BookingAdminSerializer(serializers.ModelSerializer):
     class Meta:
         model  = Booking
         fields = [
-            'id', 'customer_name', 'customer_phone',
+            'id', 'customer_name', 'customer_phone','service_visit_cost',
             'service_title', 'address', 'scheduled_date',
             'notes', 'status', 'total_cost','coupon_code', 'discount_amount', 'final_cost',
             'items', 'created_at', 'updated_at','provider_name', 'provider_phone'
