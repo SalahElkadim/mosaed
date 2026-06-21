@@ -289,7 +289,7 @@ class BookingAdminSerializer(serializers.ModelSerializer):
         model  = Booking
         fields = [
             'id', 'customer_name', 'customer_phone','service_visit_cost',
-            'service_title', 'address', 'scheduled_date',
+            'service_title', 'address', 'scheduled_date','service_id',
             'notes', 'status', 'total_cost','coupon_code', 'discount_amount', 'final_cost',
             'items', 'created_at', 'updated_at','provider_name', 'provider_phone'
         ]
