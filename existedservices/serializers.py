@@ -172,7 +172,6 @@ class BookingCreateSerializer(serializers.Serializer):
     scheduled_date = serializers.DateField()
     notes          = serializers.CharField(required=False, allow_blank=True, default='')
     items          = BookingItemCreateSerializer(many=True)
-    provider_id    = serializers.UUIDField()
     coupon_code    = serializers.CharField(required=False, allow_blank=True, default='')  # ← جديد
 
     address_id   = serializers.UUIDField(required=False)
@@ -199,7 +198,7 @@ class BookingCreateSerializer(serializers.Serializer):
             customer=customer,
             service=service,
             address=address,
-            provider_id=validated_data.pop('provider_id'),
+            provider=None,
             **validated_data
         )
 
@@ -611,3 +610,5 @@ class CouponValidateSerializer(serializers.Serializer):
 
         attrs['coupon'] = coupon
         return attrs
+    
+

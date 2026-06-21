@@ -876,3 +876,27 @@ class AdminAvailableProvidersForServiceView(APIView):
             for p in providers
         ]
         return Response(data)
+    
+
+class AdminBookingAssignProviderView(APIView):
+    permission_classes = [IsAdminUser]
+
+    def patch(self, request, booking_id):
+        try:
+            booking = Booking.objects.get(id=booking_id)
+        except Booking.DoesNotExist:
+            return Response({'error': 'Booking not found.'}, status=404)
+
+        provider_id = request.data.get('provider_id')
+        if not provider_id:
+            return Response({'error': 'provider_id is required.'}, status=400)
+
+        from accounts.models import Provider
+        try:
+            provider = Provider.objects.get(id=provider_id, is_active=True, is_approved=True)
+        except Provider.DoesNotExist:
+            return Response({'error': 'Provider not found.'}, status=404)
+
+        booking.provider = provider
+        booking.save(update_fields=['provider'])
+        return Response(BookingAdminSerializer(booking).data)

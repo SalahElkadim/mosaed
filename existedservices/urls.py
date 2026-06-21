@@ -19,7 +19,7 @@ from .views import (
     ServiceProviderListView,AdminServiceProviderListView,AdminServiceProviderDetailView,ServiceReviewListView,
     ServiceRatingSummaryView,
     AdminReviewDeleteView,
-    AdminServiceReviewsClearView,AdminServiceWarrantyView,
+    AdminServiceReviewsClearView,AdminServiceWarrantyView,AdminBookingAssignProviderView,
     ProviderCompletionFormView,
     ProviderCompletionMediaView,
     CouponValidateView,
@@ -80,5 +80,7 @@ urlpatterns = [
      path('admin/coupons/<uuid:coupon_id>/', AdminCouponDetailView.as_view()),
      path('admin/services/<uuid:service_id>/available-providers/', 
      AdminAvailableProvidersForServiceView.as_view()),
+     path('admin/bookings/<uuid:booking_id>/assign-provider/', 
+     AdminBookingAssignProviderView.as_view()),
     
 ]
