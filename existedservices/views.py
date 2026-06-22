@@ -942,6 +942,21 @@ class ProviderPreviousWorkCreateView(APIView):
         except ServiceCompletionForm.DoesNotExist:
             return None
 
+    def get(self, request, booking_id):  # ← أضف دي
+        user_type = getattr(request.auth, 'payload', {}).get('user_type')
+        try:
+            if user_type == 'admin':
+                form = ServiceCompletionForm.objects.get(booking__id=booking_id)
+            else:
+                form = ServiceCompletionForm.objects.get(
+                    booking__id=booking_id,
+                    booking__provider=request.user
+                )
+            work = form.previous_work
+        except (ServiceCompletionForm.DoesNotExist, PreviousWork.DoesNotExist):
+            return Response({'error': 'Previous work not found.'}, status=404)
+        return Response(PreviousWorkSerializer(work).data)
+
     def post(self, request, booking_id):
         form = self.get_form(request, booking_id)
         if not form:

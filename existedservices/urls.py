@@ -86,7 +86,7 @@ urlpatterns = [
      path('services/<uuid:service_id>/previous-works/', ServicePreviousWorksView.as_view()),
 
      # Provider / Admin
-     path('bookings/<uuid:booking_id>/previous-work/', ProviderPreviousWorkCreateView.as_view()),
-     path('bookings/<uuid:booking_id>/previous-work/manage/', ProviderPreviousWorkDetailView.as_view()),
+     path('bookings/<uuid:booking_id>/previous-work/', ProviderPreviousWorkDetailView.as_view()),
+
     
 ]
