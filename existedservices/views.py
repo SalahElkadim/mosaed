@@ -987,6 +987,12 @@ class ProviderPreviousWorkDetailView(APIView):
         except (ServiceCompletionForm.DoesNotExist, PreviousWork.DoesNotExist):
             return None
 
+    def get(self, request, booking_id):   # ← أضف الميثود دي
+        work = self.get_work(request, booking_id)
+        if not work:
+            return Response({'error': 'Previous work not found.'}, status=404)
+        return Response(PreviousWorkSerializer(work).data)
+    
     def patch(self, request, booking_id):
         work = self.get_work(request, booking_id)
         if not work:
