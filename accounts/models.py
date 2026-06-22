@@ -465,7 +465,7 @@ class PreviousWork(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        db_table = 'previous_works'
+        db_table = 'provider_previous_works' 
         ordering = ['-created_at']
 
     def __str__(self):

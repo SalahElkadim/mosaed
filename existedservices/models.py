@@ -397,7 +397,7 @@ class PreviousWork(models.Model):
     created_at   = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        db_table     = 'previous_works'
+        db_table = 'service_previous_works'
         verbose_name = 'Previous Work'
         ordering     = ['-created_at']
 
