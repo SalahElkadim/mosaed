@@ -377,3 +377,29 @@ class Coupon(models.Model):
         else:
             discount = min(self.discount_value, total_cost)
         return round(discount, 2)
+    
+
+class PreviousWork(models.Model):
+    id      = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    service = models.ForeignKey(
+        ExistedService,
+        on_delete=models.CASCADE,
+        related_name='previous_works'
+    )
+    completion_form = models.OneToOneField(
+        ServiceCompletionForm,
+        on_delete=models.CASCADE,
+        related_name='previous_work',
+        null=True, blank=True   # null لأنه بيتعمل بعد اتمام الخدمة
+    )
+    before_image = models.URLField()
+    after_image  = models.URLField()
+    created_at   = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table     = 'previous_works'
+        verbose_name = 'Previous Work'
+        ordering     = ['-created_at']
+
+    def __str__(self):
+        return f"PreviousWork for {self.service.title} — form#{self.completion_form_id}"

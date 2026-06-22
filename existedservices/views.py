@@ -3,15 +3,15 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAdminUser
 from accounts.permissions import IsCustomer,IsProviderOrAdmin   
-from .models import ExistedService, ServiceAttribute, Booking, ExistedService, ServiceReview, ServiceProvider, Warranty
+from .models import ExistedService, ServiceAttribute, PreviousWork,Booking, ExistedService, ServiceReview, ServiceProvider, Warranty
 from utils.cloudinary import upload_image, upload_video
 from .serializers import (
     # Service
     ExistedServiceListSerializer,
     ExistedServiceDetailSerializer,
-    ExistedServiceAdminListSerializer,
+    ExistedServiceAdminListSerializer,PreviousWorkSerializer,
     ExistedServiceAdminDetailSerializer,
-    ExistedServiceWriteSerializer,WarrantyWriteSerializer,
+    ExistedServiceWriteSerializer,WarrantyWriteSerializer,PreviousWorkWriteSerializer,
     # Attribute
     ServiceAttributeAdminSerializer,
     ServiceAttributeWriteSerializer,
@@ -900,3 +900,117 @@ class AdminBookingAssignProviderView(APIView):
         booking.provider = provider
         booking.save(update_fields=['provider'])
         return Response(BookingAdminSerializer(booking).data)
+    
+
+# ==================== PREVIOUS WORK VIEWS ====================
+
+class ServicePreviousWorksView(APIView):
+    """
+    GET /services/<service_id>/previous-works/
+    العميل يشوف الأعمال السابقة للخدمة (قبل/بعد)
+    """
+    permission_classes = [AllowAny]
+
+    def get(self, request, service_id):
+        try:
+            service = ExistedService.objects.get(id=service_id, is_active=True)
+        except ExistedService.DoesNotExist:
+            return Response({'error': 'Service not found.'}, status=404)
+
+        works = service.previous_works.select_related('completion_form').all()
+        return Response(PreviousWorkSerializer(works, many=True).data)
+
+
+class ProviderPreviousWorkCreateView(APIView):
+    """
+    POST /bookings/<booking_id>/previous-work/
+    الفني يضيف عمل سابق (قبل/بعد) على نموذج الاتمام
+    يقدر يضيفه قبل أو بعد ما يعمل finish للنموذج
+    """
+    permission_classes = [IsProviderOrAdmin]
+
+    def get_form(self, request, booking_id):
+        user_type = getattr(request.auth, 'payload', {}).get('user_type')
+        try:
+            if user_type == 'admin':
+                return ServiceCompletionForm.objects.get(booking__id=booking_id)
+            else:
+                return ServiceCompletionForm.objects.get(
+                    booking__id=booking_id,
+                    booking__provider=request.user
+                )
+        except ServiceCompletionForm.DoesNotExist:
+            return None
+
+    def post(self, request, booking_id):
+        form = self.get_form(request, booking_id)
+        if not form:
+            return Response({'error': 'Completion form not found.'}, status=404)
+
+        # رفع الصور على Cloudinary
+        data = {}
+        if 'before_image' in request.FILES:
+            data['before_image'] = upload_image(
+                request.FILES['before_image'], folder="previous_works"
+            )
+        if 'after_image' in request.FILES:
+            data['after_image'] = upload_image(
+                request.FILES['after_image'], folder="previous_works"
+            )
+
+        serializer = PreviousWorkWriteSerializer(
+            data=data, context={'form': form}
+        )
+        serializer.is_valid(raise_exception=True)
+        work = serializer.save()
+        return Response(PreviousWorkSerializer(work).data, status=201)
+
+
+class ProviderPreviousWorkDetailView(APIView):
+    """
+    PATCH  /bookings/<booking_id>/previous-work/  → تعديل الصور
+    DELETE /bookings/<booking_id>/previous-work/  → حذف
+    """
+    permission_classes = [IsProviderOrAdmin]
+
+    def get_work(self, request, booking_id):
+        user_type = getattr(request.auth, 'payload', {}).get('user_type')
+        try:
+            if user_type == 'admin':
+                form = ServiceCompletionForm.objects.get(booking__id=booking_id)
+            else:
+                form = ServiceCompletionForm.objects.get(
+                    booking__id=booking_id,
+                    booking__provider=request.user
+                )
+            return form.previous_work
+        except (ServiceCompletionForm.DoesNotExist, PreviousWork.DoesNotExist):
+            return None
+
+    def patch(self, request, booking_id):
+        work = self.get_work(request, booking_id)
+        if not work:
+            return Response({'error': 'Previous work not found.'}, status=404)
+
+        data = {}
+        if 'before_image' in request.FILES:
+            data['before_image'] = upload_image(
+                request.FILES['before_image'], folder="previous_works"
+            )
+        if 'after_image' in request.FILES:
+            data['after_image'] = upload_image(
+                request.FILES['after_image'], folder="previous_works"
+            )
+
+        # update مباشر بدون الـ validation بتاع الـ create
+        for field, value in data.items():
+            setattr(work, field, value)
+        work.save()
+        return Response(PreviousWorkSerializer(work).data)
+
+    def delete(self, request, booking_id):
+        work = self.get_work(request, booking_id)
+        if not work:
+            return Response({'error': 'Previous work not found.'}, status=404)
+        work.delete()
+        return Response({'message': 'Previous work deleted successfully.'})

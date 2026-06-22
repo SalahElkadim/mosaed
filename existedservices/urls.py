@@ -11,10 +11,10 @@ from .views import (
     AdminServiceAttributeDetailView,
     # Client - Bookings
     CustomerBookingListView,
-    CustomerBookingDetailView,
+    CustomerBookingDetailView,ProviderPreviousWorkCreateView,ProviderPreviousWorkDetailView,
     # Admin - Bookings
     AdminBookingListView,
-    AdminBookingDetailView,
+    AdminBookingDetailView,ServicePreviousWorksView,
     AdminBookingStatusView,
     ServiceProviderListView,AdminServiceProviderListView,AdminServiceProviderDetailView,ServiceReviewListView,
     ServiceRatingSummaryView,
@@ -82,5 +82,11 @@ urlpatterns = [
      AdminAvailableProvidersForServiceView.as_view()),
      path('admin/bookings/<uuid:booking_id>/assign-provider/', 
      AdminBookingAssignProviderView.as_view()),
+     # Client
+     path('services/<uuid:service_id>/previous-works/', ServicePreviousWorksView.as_view()),
+
+     # Provider / Admin
+     path('bookings/<uuid:booking_id>/previous-work/', ProviderPreviousWorkCreateView.as_view()),
+     path('bookings/<uuid:booking_id>/previous-work/manage/', ProviderPreviousWorkDetailView.as_view()),
     
 ]

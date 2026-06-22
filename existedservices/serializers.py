@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import ExistedService, ServiceAttribute, Booking, BookingItem, ServiceReview, ServiceProvider, Specialization, Warranty, ServiceCompletionForm, CompletionMedia
+from .models import ExistedService, ServiceAttribute, Booking, PreviousWork,BookingItem, ServiceReview, ServiceProvider, Specialization, Warranty, ServiceCompletionForm, CompletionMedia
 from accounts.serializers import SpecializationSerializer  # Import SpecializationSerializer
 from accounts.serializers import CustomerAddressSerializer
 from accounts.models import CustomerAddress
@@ -612,3 +612,33 @@ class CouponValidateSerializer(serializers.Serializer):
         return attrs
     
 
+class PreviousWorkSerializer(serializers.ModelSerializer):
+    """للعميل — يشوف الأعمال السابقة"""
+    class Meta:
+        model  = PreviousWork
+        fields = ['id', 'before_image', 'after_image', 'created_at']
+        read_only_fields = fields
+
+
+class PreviousWorkWriteSerializer(serializers.ModelSerializer):
+    """الفني/الأدمن يضيف عمل سابق على نموذج اتمام الخدمة"""
+    class Meta:
+        model  = PreviousWork
+        fields = ['before_image', 'after_image']
+
+    def validate(self, attrs):
+        form = self.context['form']
+        # كل form ممكن يكون فيه previous_work واحد بس (OneToOne)
+        if hasattr(form, 'previous_work'):
+            raise serializers.ValidationError(
+                "This completion form already has a previous work entry."
+            )
+        return attrs
+
+    def create(self, validated_data):
+        form = self.context['form']
+        return PreviousWork.objects.create(
+            service=form.booking.service,
+            completion_form=form,
+            **validated_data
+        )
