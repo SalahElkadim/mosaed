@@ -11,7 +11,7 @@ from .views import (
     AdminServiceAttributeDetailView,
     # Client - Bookings
     CustomerBookingListView,
-    CustomerBookingDetailView,ProviderPreviousWorkCreateView,ProviderPreviousWorkDetailView,
+    CustomerBookingDetailView,ProviderPreviousWorkView,
     # Admin - Bookings
     AdminBookingListView,
     AdminBookingDetailView,ServicePreviousWorksView,
@@ -86,7 +86,7 @@ urlpatterns = [
      path('services/<uuid:service_id>/previous-works/', ServicePreviousWorksView.as_view()),
 
      # Provider / Admin
-     path('bookings/<uuid:booking_id>/previous-work/', ProviderPreviousWorkDetailView.as_view()),
+     path('bookings/<uuid:booking_id>/previous-work/', ProviderPreviousWorkView.as_view()),
 
     
 ]
