@@ -966,8 +966,13 @@ class ProviderPreviousWorkView(APIView):
         data = {}
         if 'before_image' in request.FILES:
             data['before_image'] = upload_image(request.FILES['before_image'], folder="previous_works")
+        elif 'before_image' in request.data:
+            data['before_image'] = request.data['before_image']  # URL مباشرة
+
         if 'after_image' in request.FILES:
             data['after_image'] = upload_image(request.FILES['after_image'], folder="previous_works")
+        elif 'after_image' in request.data:
+            data['after_image'] = request.data['after_image']
         for field, value in data.items():
             setattr(work, field, value)
         work.save()
