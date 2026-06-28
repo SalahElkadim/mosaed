@@ -989,3 +989,53 @@ class ProviderPreviousWorkView(APIView):
             return Response({'error': 'Previous work not found.'}, status=404)
         work.delete()
         return Response({'message': 'Previous work deleted successfully.'})
+    
+
+from accounts.permissions import IsProvider
+
+class ProviderBookingListView(APIView):
+    permission_classes = [IsProvider]
+
+    def get(self, request):
+        status_filter = request.query_params.get('status')
+        bookings = Booking.objects.filter(provider=request.user).select_related(
+            'customer', 'service'
+        ).prefetch_related('items__attribute')
+
+        if status_filter in ('pending', 'confirmed', 'completed', 'cancelled'):
+            bookings = bookings.filter(status=status_filter)
+
+        return Response(BookingAdminSerializer(bookings, many=True).data)
+
+
+class ProviderBookingDetailView(APIView):
+    permission_classes = [IsProvider]
+
+    def get(self, request, booking_id):
+        try:
+            booking = Booking.objects.select_related(
+                'customer', 'service'
+            ).prefetch_related('items__attribute').get(
+                id=booking_id, provider=request.user
+            )
+        except Booking.DoesNotExist:
+            return Response({'error': 'Booking not found.'}, status=404)
+        return Response(BookingAdminSerializer(booking).data)
+
+
+class ProviderBookingStatusView(APIView):
+    permission_classes = [IsProvider]
+
+    def post(self, request, booking_id):
+        try:
+            booking = Booking.objects.get(id=booking_id, provider=request.user)
+        except Booking.DoesNotExist:
+            return Response({'error': 'Booking not found.'}, status=404)
+
+        serializer = BookingStatusUpdateSerializer(
+            data=request.data, context={'booking': booking}
+        )
+        serializer.is_valid(raise_exception=True)
+        booking.status = serializer.validated_data['status']
+        booking.save(update_fields=['status'])
+        return Response(BookingAdminSerializer(booking).data)

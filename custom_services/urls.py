@@ -14,10 +14,10 @@ from .views import (
     ProviderOfferWithdrawView,
     ProviderChatView,
     ProviderCustomCompletionFormView,
-    ProviderCustomCompletionMediaView,
+    ProviderCustomCompletionMediaView,ProviderBookingDetailView,ProviderBookingStatusView,
     # Admin
     AdminCustomRequestListView,
-    AdminCustomRequestDetailView,
+    AdminCustomRequestDetailView,ProviderBookingListView,
     AdminCustomRequestStatusView,
     AdminExpiredRequestsView,
     AdminCustomRequestOffersView,
@@ -108,4 +108,7 @@ urlpatterns = [
     path('admin/platform-settings/',
          AdminPlatformSettingsView.as_view(),
          name='admin-platform-settings'),
+         path('provider/bookings/', ProviderBookingListView.as_view()),
+path('provider/bookings/<uuid:booking_id>/', ProviderBookingDetailView.as_view()),
+path('provider/bookings/<uuid:booking_id>/status/', ProviderBookingStatusView.as_view()),
 ]
