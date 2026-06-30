@@ -8,7 +8,7 @@ from .views import (
     AdminExistedServiceDetailView,
     # Admin - Attributes
     AdminServiceAttributeListView,
-    AdminServiceAttributeDetailView,
+    AdminServiceAttributeDetailView,ProviderBookingStatusView,
     # Client - Bookings
     CustomerBookingListView,
     CustomerBookingDetailView,ProviderPreviousWorkView,ProviderBookingDetailView,
@@ -88,6 +88,7 @@ urlpatterns = [
      # Provider / Admin
      path('bookings/<uuid:booking_id>/previous-work/', ProviderPreviousWorkView.as_view()),
      path('provider/bookings/<uuid:booking_id>/', ProviderBookingDetailView.as_view()),
+     path('provider/bookings/<uuid:booking_id>/status/', ProviderBookingStatusView.as_view()),
 
 
     
