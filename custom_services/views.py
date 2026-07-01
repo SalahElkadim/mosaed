@@ -7,9 +7,9 @@ from utils.cloudinary import upload_image, upload_video
 from accounts.permissions import IsCustomer, IsProvider, IsProviderOrAdmin
 from .models import (
     CustomRequest, ServiceOffer, RequestChat,
-    PlatformSettings, Booking
+    PlatformSettings
 )
-from existedservices.models import ServiceCompletionForm, CompletionMedia
+from existedservices.models import ServiceCompletionForm, CompletionMedia , Booking
 from .serializers import (
     CustomRequestCreateSerializer,
     CustomRequestUpdateSerializer,
