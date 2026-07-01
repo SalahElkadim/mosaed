@@ -7,7 +7,7 @@ from utils.cloudinary import upload_image, upload_video
 from accounts.permissions import IsCustomer, IsProvider, IsProviderOrAdmin
 from .models import (
     CustomRequest, ServiceOffer, RequestChat,
-    PlatformSettings
+    PlatformSettings, Booking
 )
 from existedservices.models import ServiceCompletionForm, CompletionMedia
 from .serializers import (
@@ -30,6 +30,8 @@ from existedservices.serializers import (
     ServiceCompletionFormUpdateSerializer,
     CompletionMediaWriteSerializer,
     CompletionMediaSerializer,
+    BookingStatusUpdateSerializer,  # Added import
+    BookingAdminSerializer,  # Import added for fixing the issue
 )
 
 
@@ -820,3 +822,19 @@ class AdminPlatformSettingsView(APIView):
             PlatformSettingsSerializer(setting).data,
             status=status.HTTP_200_OK
         )
+    
+from accounts.permissions import IsProvider
+
+class ProviderBookingListView(APIView):
+    permission_classes = [IsProvider]
+
+    def get(self, request):
+        status_filter = request.query_params.get('status')
+        bookings = Booking.objects.filter(provider=request.user).select_related(
+            'customer', 'service'
+        ).prefetch_related('items__attribute')
+
+        if status_filter in ('pending', 'confirmed', 'completed', 'cancelled'):
+            bookings = bookings.filter(status=status_filter)
+
+        return Response(BookingAdminSerializer(bookings, many=True).data)
