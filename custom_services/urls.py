@@ -6,7 +6,7 @@ from .views import (
     CustomerCancelRequestView,
     CustomerOfferListView,
     CustomerAcceptOfferView,
-    CustomerChatView,
+    CustomerChatView,DeviceTokenView,
     # Provider
     ProviderCustomRequestListView,
     ProviderCustomRequestDetailView,
@@ -127,4 +127,6 @@ urlpatterns = [
      path('provider/custom-requests/<uuid:request_id>/chat/read/',
      ProviderChatMarkReadView.as_view(),
      name='provider-chat-mark-read'),
+     path('device-tokens/', DeviceTokenView.as_view(), name='device-token'),
+
 ]

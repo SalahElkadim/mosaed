@@ -397,3 +397,19 @@ class NotificationSerializer(serializers.ModelSerializer):
             'is_read', 'created_at', 'read_at'
         ]
         read_only_fields = fields
+
+
+"""
+إضافة في custom_services/serializers.py
+"""
+
+from .models import DeviceToken
+
+
+class DeviceTokenRegisterSerializer(serializers.Serializer):
+    token = serializers.CharField(max_length=255)
+
+    def validate_token(self, value):
+        if not value.strip():
+            raise serializers.ValidationError("التوكن لا يمكن أن يكون فارغاً.")
+        return value.strip()

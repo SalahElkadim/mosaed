@@ -1,6 +1,3 @@
-"""
-custom_services/signals.py
-"""
 
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
@@ -9,7 +6,8 @@ from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 
 from .utils.geo import is_provider_within_range
-from .models import CustomRequest, ServiceOffer, RequestChat, Notification
+from .utils.fcm import send_push_to_tokens
+from .models import CustomRequest, ServiceOffer, RequestChat, Notification, DeviceToken
 from .consumers import provider_personal_group, customer_personal_group
 from .constants import DEFAULT_SERVICE_RADIUS_KM
 
@@ -50,12 +48,39 @@ def _create_and_send(recipient_type, recipient_id, event, title, body, data, gro
         'created_at': notification.created_at.isoformat(),
     })
 
-    # مهم: نستنى الـ transaction يخلص commit فعليًا قبل ما نبعت على الـ WebSocket.
-    # لو بعتنا فورًا وحصل rollback بعد كده (لأي سبب في نفس الـ request)،
+    # مهم: نستنى الـ transaction يخلص commit فعليًا قبل ما نبعت أي حاجة
+    # (WebSocket أو Push) للخارج. لو بعتنا فورًا وحصل rollback بعد كده،
     # يبقى العميل/الفني استقبل إشعار عن حدث اتلغى ومحصلش في الداتابيز أصلاً.
     # لو مفيش transaction مفتوحة أصلاً، on_commit بينفذ فورًا زي ما هو.
     transaction.on_commit(lambda: _send_to_group(group_name, payload))
+    transaction.on_commit(
+        lambda: _send_push_notification(recipient_type, recipient_id, title, body, payload)
+    )
     return notification
+
+
+def _send_push_notification(recipient_type, recipient_id, title, body, data):
+    """
+    بيبعت push notification (FCM) لكل أجهزة اليوزر المسجلة، وبيحذف
+    أي توكن اتبين إنه غير صالح (uninstall أو انتهاء صلاحية).
+
+    ده منفصل تمامًا عن الـ WebSocket send — فشله (زي مشكلة اتصال بـ FCM)
+    ميأثرش على تخزين الإشعار أو البث اللحظي، لأن الاتنين مستقلين عن بعض.
+    """
+    tokens = list(
+        DeviceToken.objects.filter(
+            recipient_type=recipient_type,
+            recipient_id=str(recipient_id),
+        ).values_list('token', flat=True)
+    )
+    if not tokens:
+        return
+
+    result = send_push_to_tokens(tokens, title=title, body=body, data=data)
+
+    invalid_tokens = result.get('invalid_tokens') or []
+    if invalid_tokens:
+        DeviceToken.objects.filter(token__in=invalid_tokens).delete()
 
 
 # ==================== 1) طلب جديد → إشعار للفنيين المتوافقين ====================

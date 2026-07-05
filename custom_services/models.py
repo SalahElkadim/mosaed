@@ -283,3 +283,36 @@ class Notification(models.Model):
             self.is_read = True
             self.read_at = timezone.now()
             self.save(update_fields=['is_read', 'read_at'])
+
+
+
+class DeviceToken(models.Model):
+    """
+    توكن FCM لجهاز واحد. اليوزر (عميل أو فني) ممكن يكون عنده أكتر من
+    توكن في نفس الوقت (موبايل + تابلت مثلاً)، فمفيش unique على اليوزر
+    نفسه، بس التوكن نفسه لازم يكون unique (توكن واحد بيمثل جهاز واحد).
+    """
+    RECIPIENT_TYPE_CHOICES = [
+        ('customer', 'Customer'),
+        ('provider', 'Provider'),
+    ]
+ 
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+ 
+    recipient_type = models.CharField(max_length=20, choices=RECIPIENT_TYPE_CHOICES)
+    recipient_id = models.CharField(max_length=100)
+ 
+    token = models.CharField(max_length=255, unique=True)
+ 
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+ 
+    class Meta:
+        db_table = 'device_tokens'
+        indexes = [
+            models.Index(fields=['recipient_type', 'recipient_id']),
+        ]
+ 
+    def __str__(self):
+        return f"{self.recipient_type}:{self.recipient_id} — {self.token[:20]}..."
+ 

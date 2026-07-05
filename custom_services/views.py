@@ -7,7 +7,7 @@ from utils.cloudinary import upload_image, upload_video
 from accounts.permissions import IsCustomer, IsProvider, IsProviderOrAdmin
 from .models import (
     CustomRequest, ServiceOffer, RequestChat,Notification,
-    PlatformSettings
+    PlatformSettings,DeviceToken
 )
 from existedservices.models import ServiceCompletionForm, CompletionMedia , Booking
 from .serializers import (
@@ -23,7 +23,7 @@ from .serializers import (
     ServiceOfferAdminSerializer,
     RequestChatSerializer,
     RequestChatCreateSerializer,
-    PlatformSettingsSerializer,NotificationSerializer
+    PlatformSettingsSerializer,NotificationSerializer,DeviceTokenRegisterSerializer
 )
 from existedservices.serializers import (
     ServiceCompletionFormSerializer,
@@ -1118,3 +1118,49 @@ class NotificationMarkAllReadView(APIView):
         ).update(is_read=True, read_at=timezone.now())
  
         return Response({'message': 'تم تعليم الكل كمقروء.'}, status=status.HTTP_200_OK)
+    
+
+
+class DeviceTokenView(APIView):
+    """
+    POST   /device-tokens/   body: {"token": "<fcm_token>"}
+        بتتنادى:
+        - وقت تسجيل الدخول (بعد الحصول على FCM token من Firebase SDK)
+        - أي مرة يحصل فيها onTokenRefresh في التطبيق (Firebase بيغيّر
+          التوكن من وقت للتاني تلقائيًا، مش بس أول مرة)
+ 
+    DELETE /device-tokens/   body: {"token": "<fcm_token>"}
+        بتتنادى وقت تسجيل الخروج (logout) — عشان مبعتش إشعارات ليوزر
+        مسجل خروج على جهاز مش بتاعه دلوقتي.
+    """
+    permission_classes = [IsAuthenticated]
+ 
+    def post(self, request):
+        user_type = getattr(request.auth, 'payload', {}).get('user_type')
+        if user_type not in ('customer', 'provider'):
+            return Response({'error': 'غير مصرح.'}, status=status.HTTP_403_FORBIDDEN)
+ 
+        serializer = DeviceTokenRegisterSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        token = serializer.validated_data['token']
+ 
+        # لو التوكن ده كان مسجل قبل كده على يوزر تاني (نادر بس ممكن، مثلاً
+        # جهاز اتباع من يوزر ليوزر تاني)، ننقله لليوزر الحالي بدل ما نعمل duplicate error
+        DeviceToken.objects.update_or_create(
+            token=token,
+            defaults={
+                'recipient_type': user_type,
+                'recipient_id': str(request.user.id),
+            }
+        )
+ 
+        return Response({'message': 'تم تسجيل التوكن بنجاح.'}, status=status.HTTP_200_OK)
+ 
+    def delete(self, request):
+        token = request.data.get('token')
+        if not token:
+            return Response({'error': 'token مطلوب.'}, status=status.HTTP_400_BAD_REQUEST)
+ 
+        DeviceToken.objects.filter(token=token).delete()
+        return Response({'message': 'تم حذف التوكن.'}, status=status.HTTP_200_OK)
+ 
