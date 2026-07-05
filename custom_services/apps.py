@@ -5,4 +5,5 @@ class CustomrequestsConfig(AppConfig):
     name = 'custom_services'
 
     def ready(self):
-        import custom_services.tasks  # noqa
+        import custom_services.tasks    
+        import custom_services.signals  

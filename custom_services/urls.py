@@ -21,7 +21,12 @@ from .views import (
     AdminCustomRequestStatusView,
     AdminExpiredRequestsView,
     AdminCustomRequestOffersView,
-    AdminPlatformSettingsView,
+    AdminPlatformSettingsView,NotificationListView,
+    NotificationUnreadCountView,
+    NotificationMarkReadView,
+    NotificationMarkAllReadView,
+    CustomerChatMarkReadView,
+    ProviderChatMarkReadView,
 )
 
 urlpatterns = [
@@ -109,4 +114,17 @@ urlpatterns = [
          AdminPlatformSettingsView.as_view(),
          name='admin-platform-settings'),
          path('provider/bookings/', ProviderBookingListView.as_view()),
+
+    path('notifications/', NotificationListView.as_view(), name='notification-list'),
+    path('notifications/unread-count/', NotificationUnreadCountView.as_view(), name='notification-unread-count'),
+    path('notifications/mark-all-read/', NotificationMarkAllReadView.as_view(), name='notification-mark-all-read'),
+    path('notifications/<uuid:notification_id>/read/', NotificationMarkReadView.as_view(), name='notification-mark-read'),
+    path('custom-requests/<uuid:request_id>/chat/read/',
+     CustomerChatMarkReadView.as_view(),
+     name='customer-chat-mark-read'),
+ 
+# ── Provider chat read ──
+     path('provider/custom-requests/<uuid:request_id>/chat/read/',
+     ProviderChatMarkReadView.as_view(),
+     name='provider-chat-mark-read'),
 ]

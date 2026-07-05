@@ -192,12 +192,94 @@ class RequestChat(models.Model):
     sender_type = models.CharField(max_length=20, choices=SENDER_TYPE_CHOICES)
     sender_id   = models.UUIDField()    # ID العميل أو الفني
     message     = models.TextField()
+
+    # جديد: حالة القراءة — بتتحدث لما الطرف المستقبل يفتح شاشة الشات
+    is_read = models.BooleanField(default=False)
+    read_at = models.DateTimeField(null=True, blank=True)
+
     created_at  = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         db_table     = 'request_chats'
         verbose_name = 'Request Chat'
         ordering     = ['created_at']
+        indexes = [
+            models.Index(fields=['request', 'sender_type', 'is_read']),
+        ]
 
     def __str__(self):
         return f"{self.sender_type}:{self.sender_id} → Request#{self.request.id}"
+
+    @classmethod
+    def mark_as_read_for_recipient(cls, custom_request, recipient_type):
+        """
+        بتعلّم كل الرسائل اللي بعتها 'الطرف التاني' (مش recipient_type) كمقروءة.
+        مثال: لو العميل (recipient_type='customer') فتح الشات، بنعلّم رسائل الفني
+        كمقروءة (لأن الفني هو اللي بعتها والعميل هو اللي قراها).
+
+        بترجع الـ queryset اللي اتحدث (list of ids) عشان نقدر نبعتهم في إشعار الـ WebSocket.
+        """
+        sender_type_to_mark = 'provider' if recipient_type == 'customer' else 'customer'
+
+        unread_messages = cls.objects.filter(
+            request=custom_request,
+            sender_type=sender_type_to_mark,
+            is_read=False,
+        )
+        message_ids = list(unread_messages.values_list('id', flat=True))
+
+        if message_ids:
+            cls.objects.filter(id__in=message_ids).update(
+                is_read=True,
+                read_at=timezone.now(),
+            )
+
+        return message_ids
+
+class Notification(models.Model):
+    RECIPIENT_TYPE_CHOICES = [
+        ('customer', 'Customer'),
+        ('provider', 'Provider'),
+    ]
+ 
+    EVENT_CHOICES = [
+        ('new_custom_request', 'New Custom Request'),
+        ('new_offer', 'New Offer'),
+        ('offer_accepted', 'Offer Accepted'),
+        ('new_chat_message', 'New Chat Message'),
+    ]
+ 
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+ 
+    # زي RequestChat بالظبط — مفيش FK واحد ينفع للعميل والفني مع بعض،
+    # فبنستخدم CharField للـ id + حقل نوع منفصل
+    recipient_type = models.CharField(max_length=20, choices=RECIPIENT_TYPE_CHOICES)
+    recipient_id = models.CharField(max_length=100)
+ 
+    event = models.CharField(max_length=30, choices=EVENT_CHOICES)
+    title = models.CharField(max_length=255)
+    body = models.CharField(max_length=255, blank=True)
+ 
+    # أي بيانات إضافية (request_id, offer_id, distance_km...) عشان الفلاتر
+    # يقدر يوجه اليوزر أو يستخدمها من غير ما نعمل حقول منفصلة لكل event
+    data = models.JSONField(default=dict, blank=True)
+ 
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    read_at = models.DateTimeField(null=True, blank=True)
+ 
+    class Meta:
+        db_table = 'notifications'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['recipient_type', 'recipient_id', 'is_read']),
+        ]
+ 
+    def __str__(self):
+        return f"{self.recipient_type}:{self.recipient_id} - {self.event}"
+ 
+    def mark_as_read(self):
+        if not self.is_read:
+            self.is_read = True
+            self.read_at = timezone.now()
+            self.save(update_fields=['is_read', 'read_at'])

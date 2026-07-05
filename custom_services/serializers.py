@@ -220,7 +220,8 @@ class ServiceOfferSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = fields
 
-
+from .utils.geo import get_provider_default_address, haversine_km
+from .constants import DEFAULT_SERVICE_RADIUS_KM
 class ServiceOfferCreateSerializer(serializers.Serializer):
     """الفني يبعت عرض"""
     provider_price = serializers.DecimalField(max_digits=10, decimal_places=2)
@@ -230,17 +231,17 @@ class ServiceOfferCreateSerializer(serializers.Serializer):
         if value <= 0:
             raise serializers.ValidationError("السعر يجب أن يكون أكبر من 0.")
         return value
-
+    
     def validate(self, attrs):
         request_obj = self.context['custom_request']
         provider    = self.context['request'].user
-
+ 
         # الطلب لازم يكون published أو offers_received
         if request_obj.status not in ('published', 'offers_received'):
             raise serializers.ValidationError(
                 "لا يمكن إرسال عرض على هذا الطلب."
             )
-
+ 
         # الفني مبعتش عرض قبل كده
         if ServiceOffer.objects.filter(
             request=request_obj, provider=provider
@@ -248,19 +249,29 @@ class ServiceOfferCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 "لقد أرسلت عرضاً على هذا الطلب من قبل."
             )
-
-        # الفني في نفس المنطقة
+ 
         address = request_obj.address
-        if (
-            provider.city   != address.city or
-            provider.region != address.region
-        ):
+        if not address or address.lat is None or address.lng is None:
+            raise serializers.ValidationError(
+                "لا يمكن إرسال عرض على هذا الطلب (العنوان غير مكتمل)."
+            )
+ 
+        provider_address = get_provider_default_address(provider)
+        if not provider_address:
+            raise serializers.ValidationError(
+                "يجب إضافة عنوان افتراضي بإحداثيات أولاً قبل إرسال عروض."
+            )
+ 
+        distance = haversine_km(
+            provider_address.lat, provider_address.lng,
+            address.lat, address.lng
+        )
+        if distance > DEFAULT_SERVICE_RADIUS_KM:
             raise serializers.ValidationError(
                 "لا يمكنك إرسال عرض خارج نطاق منطقتك."
             )
-
+ 
         return attrs
-
     def create(self, validated_data):
         request_obj = self.context['custom_request']
         provider    = self.context['request'].user
@@ -299,7 +310,7 @@ class ServiceOfferAdminSerializer(serializers.ModelSerializer):
 class RequestChatSerializer(serializers.ModelSerializer):
     class Meta:
         model  = RequestChat
-        fields = ['id', 'sender_type', 'sender_id', 'message', 'created_at']
+        fields = ['id', 'sender_type', 'sender_id', 'message', 'is_read', 'read_at', 'created_at']
         read_only_fields = fields
 
 
@@ -373,3 +384,16 @@ class CustomRequestStatusUpdateSerializer(serializers.Serializer):
                 f"المسموح: {allowed}"
             )
         return attrs
+    
+
+from .models import Notification
+ 
+ 
+class NotificationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Notification
+        fields = [
+            'id', 'event', 'title', 'body', 'data',
+            'is_read', 'created_at', 'read_at'
+        ]
+        read_only_fields = fields

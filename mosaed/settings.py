@@ -6,6 +6,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 from dotenv import load_dotenv
 load_dotenv()
 import cloudinary
+from celery.schedules import crontab
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
@@ -20,12 +21,14 @@ ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost').split(',')
 CSRF_TRUSTED_ORIGINS = os.getenv('CSRF_TRUSTED_ORIGINS', 'http://localhost:8000').split(',')
 
 INSTALLED_APPS = [
+    'daphne', 
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+     'channels',
     'rest_framework',
     'rest_framework_simplejwt',
     'rest_framework_simplejwt.token_blacklist',
@@ -99,7 +102,7 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = 'mosaed.wsgi.application'
+ASGI_APPLICATION = 'mosaed.asgi.application'
 
 from datetime import timedelta
 
@@ -177,4 +180,23 @@ MSEGAT_SENDER = os.getenv('MSEGAT_SENDER', default='OTP')  # OTP للمجاني
 CELERY_BROKER_URL = os.environ.get('REDIS_URL')
 CELERY_RESULT_BACKEND = os.environ.get('REDIS_URL')
 CELERY_TIMEZONE = 'Africa/Cairo'
-CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
+
+CELERY_BEAT_SCHEDULE = {
+    'expire-custom-requests': {
+        'task': 'expire_custom_requests',
+        'schedule': crontab(minute='*/15'),  
+    },
+
+    'cleanup-old-notifications-daily': {
+        'task': 'cleanup_old_notifications',
+        'schedule': crontab(hour=3, minute=30),
+    },
+}
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {
+            'hosts': [os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379')],
+        },
+    },
+}

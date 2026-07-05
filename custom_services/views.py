@@ -2,11 +2,11 @@ from django.utils import timezone
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework.permissions import AllowAny, IsAdminUser
+from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from utils.cloudinary import upload_image, upload_video
 from accounts.permissions import IsCustomer, IsProvider, IsProviderOrAdmin
 from .models import (
-    CustomRequest, ServiceOffer, RequestChat,
+    CustomRequest, ServiceOffer, RequestChat,Notification,
     PlatformSettings
 )
 from existedservices.models import ServiceCompletionForm, CompletionMedia , Booking
@@ -23,7 +23,7 @@ from .serializers import (
     ServiceOfferAdminSerializer,
     RequestChatSerializer,
     RequestChatCreateSerializer,
-    PlatformSettingsSerializer,
+    PlatformSettingsSerializer,NotificationSerializer
 )
 from existedservices.serializers import (
     ServiceCompletionFormSerializer,
@@ -31,17 +31,37 @@ from existedservices.serializers import (
     CompletionMediaWriteSerializer,
     CompletionMediaSerializer,
     BookingStatusUpdateSerializer,  # Added import
-    BookingAdminSerializer,  # Import added for fixing the issue
+    BookingAdminSerializer # Import added for fixing the issue
 )
 
-
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
+from .consumers import chat_group
+from django.utils import timezone
 # ==================== HELPER ====================
 
 def _check_and_expire(custom_request):
     """Lazy expiry check — يُستدعى عند جلب أي طلب."""
     custom_request.check_and_expire()
 
-
+def _broadcast_read_receipt(request_id, reader_type, message_ids):
+    """بيبلغ الطرف اللي بعت الرسائل الأصلية إنها اتقرت — نفس نمط _send_to_group في signals.py"""
+    if not message_ids:
+        return
+    channel_layer = get_channel_layer()
+    async_to_sync(channel_layer.group_send)(
+        chat_group(request_id),
+        {
+            'type': 'chat.read',
+            'payload': {
+                'event': 'messages_read',
+                'request_id': str(request_id),
+                'read_by': reader_type,
+                'message_ids': [str(mid) for mid in message_ids],
+                'read_at': timezone.now().isoformat(),
+            },
+        }
+    )
 # ==================== CUSTOMER VIEWS ====================
 
 class CustomerCustomRequestListView(APIView):
@@ -257,17 +277,20 @@ class CustomerAcceptOfferView(APIView):
 
 class CustomerChatView(APIView):
     """
-    GET  /custom-requests/<id>/chat/
+    GET  /custom-requests/<id>/chat/?limit=30&offset=0
     POST /custom-requests/<id>/chat/
     """
     permission_classes = [IsCustomer]
-
+ 
+    DEFAULT_LIMIT = 30
+    MAX_LIMIT = 100
+ 
     def get_object(self, request, request_id):
         try:
             return CustomRequest.objects.get(id=request_id, customer=request.user)
         except CustomRequest.DoesNotExist:
             return None
-
+ 
     def get(self, request, request_id):
         obj = self.get_object(request, request_id)
         if not obj:
@@ -275,13 +298,39 @@ class CustomerChatView(APIView):
                 {'error': 'الطلب غير موجود.'},
                 status=status.HTTP_404_NOT_FOUND
             )
-
-        messages = obj.chat_messages.all()
+ 
+        messages_qs = obj.chat_messages.all()
+        total_count = messages_qs.count()
+ 
+        try:
+            limit = int(request.query_params.get('limit', self.DEFAULT_LIMIT))
+        except (TypeError, ValueError):
+            limit = self.DEFAULT_LIMIT
+        limit = max(1, min(limit, self.MAX_LIMIT))
+ 
+        try:
+            offset = int(request.query_params.get('offset', 0))
+        except (TypeError, ValueError):
+            offset = 0
+        offset = max(0, offset)
+ 
+        # آخر رسائل أولاً منطقيًا للفرونت (زي واتساب: يفتح على آخر حاجة)
+        # ordering الموديل الأصلي هو created_at تصاعدي، فبنعكس هنا للصفحة الأولى
+        # ثم نرجعها لترتيبها الطبيعي عشان تتعرض تصاعديًا في الشاشة
+        page = list(messages_qs.order_by('-created_at')[offset:offset + limit])
+        page.reverse()
+ 
         return Response(
-            RequestChatSerializer(messages, many=True).data,
+            {
+                'count': total_count,
+                'limit': limit,
+                'offset': offset,
+                'has_more': offset + limit < total_count,
+                'results': RequestChatSerializer(page, many=True).data,
+            },
             status=status.HTTP_200_OK
         )
-
+ 
     def post(self, request, request_id):
         obj = self.get_object(request, request_id)
         if not obj:
@@ -289,7 +338,7 @@ class CustomerChatView(APIView):
                 {'error': 'الطلب غير موجود.'},
                 status=status.HTTP_404_NOT_FOUND
             )
-
+ 
         serializer = RequestChatCreateSerializer(
             data=request.data,
             context={
@@ -304,44 +353,89 @@ class CustomerChatView(APIView):
             RequestChatSerializer(message).data,
             status=status.HTTP_201_CREATED
         )
+ 
 
 
+ 
+class CustomerChatMarkReadView(APIView):
+    """
+    POST /custom-requests/<id>/chat/read/
+    العميل بيعلّم كل رسائل الفني (اللي لسه مقروءة) كمقروءة، وبيتبعت
+    إشعار لحظي للفني إن رسايله اتقرت (✓✓).
+    """
+    permission_classes = [IsCustomer]
+ 
+    def post(self, request, request_id):
+        try:
+            obj = CustomRequest.objects.get(id=request_id, customer=request.user)
+        except CustomRequest.DoesNotExist:
+            return Response(
+                {'error': 'الطلب غير موجود.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+ 
+        message_ids = RequestChat.mark_as_read_for_recipient(obj, recipient_type='customer')
+        _broadcast_read_receipt(obj.id, reader_type='customer', message_ids=message_ids)
+ 
+        return Response(
+            {'marked_read_count': len(message_ids)},
+            status=status.HTTP_200_OK
+        )
+ 
 # ==================== PROVIDER VIEWS ====================
 
+
+from .utils.geo import get_provider_default_address, haversine_km
+from .constants import DEFAULT_SERVICE_RADIUS_KM
 class ProviderCustomRequestListView(APIView):
     """
     GET /provider/custom-requests/
-    الفني يشوف الطلبات في منطقته (city + region + specialization)
+    الفني يشوف الطلبات القريبة منه جغرافيًا (نفس التخصص + في نطاق X كم
+    من عنوانه الافتراضي)، بدل الاعتماد على city/region اللي مش موجودين
+    في موديل Provider أصلاً.
     """
     permission_classes = [IsProvider]
 
     def get(self, request):
         provider = request.user
 
-        # المطابقة على المنطقة والتخصص
-        requests_qs = CustomRequest.objects.filter(
+        provider_address = get_provider_default_address(provider)
+        if not provider_address:
+            return Response(
+                {'error': 'يجب إضافة عنوان افتراضي بإحداثيات (lat/lng) أولاً.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        candidates = CustomRequest.objects.filter(
             status__in=('published', 'offers_received'),
             specialization=provider.specialization,
-            address__city=provider.city,
-            address__region=provider.region,
-        ).select_related('specialization', 'address').prefetch_related('offers')
-
-        # Lazy expiry
-        ids_to_expire = []
-        for req in requests_qs:
-            if req.check_and_expire():
-                ids_to_expire.append(req.id)
-
-        # إعادة الجلب بعد التحديث
-        requests_qs = CustomRequest.objects.filter(
-            status__in=('published', 'offers_received'),
-            specialization=provider.specialization,
-            address__city=provider.city,
-            address__region=provider.region,
+            address__lat__isnull=False,
+            address__lng__isnull=False,
         ).select_related('specialization', 'address')
 
+        # Lazy expiry أول حاجة
+        for req in candidates:
+            req.check_and_expire()
+
+        # إعادة الجلب بعد التحديث المحتمل
+        candidates = CustomRequest.objects.filter(
+            status__in=('published', 'offers_received'),
+            specialization=provider.specialization,
+            address__lat__isnull=False,
+            address__lng__isnull=False,
+        ).select_related('specialization', 'address').prefetch_related('offers')
+
+        # فلترة بالمسافة (مينفعش تتعمل في queryset filter عادي، بنعملها في بايثون)
+        nearby_requests = [
+            req for req in candidates
+            if haversine_km(
+                provider_address.lat, provider_address.lng,
+                req.address.lat, req.address.lng
+            ) <= DEFAULT_SERVICE_RADIUS_KM
+        ]
+
         return Response(
-            CustomRequestListSerializer(requests_qs, many=True).data,
+            CustomRequestListSerializer(nearby_requests, many=True).data,
             status=status.HTTP_200_OK
         )
 
@@ -354,15 +448,37 @@ class ProviderCustomRequestDetailView(APIView):
 
     def get(self, request, request_id):
         provider = request.user
+
+        provider_address = get_provider_default_address(provider)
+        if not provider_address:
+            return Response(
+                {'error': 'يجب إضافة عنوان افتراضي بإحداثيات (lat/lng) أولاً.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         try:
-            obj = CustomRequest.objects.get(
+            obj = CustomRequest.objects.select_related('specialization', 'address').get(
                 id=request_id,
                 specialization=provider.specialization,
-                address__city=provider.city,
-                address__region=provider.region,
             )
             _check_and_expire(obj)
         except CustomRequest.DoesNotExist:
+            return Response(
+                {'error': 'الطلب غير موجود أو خارج نطاق منطقتك.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        if not obj.address or obj.address.lat is None or obj.address.lng is None:
+            return Response(
+                {'error': 'الطلب غير موجود أو خارج نطاق منطقتك.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        distance = haversine_km(
+            provider_address.lat, provider_address.lng,
+            obj.address.lat, obj.address.lng
+        )
+        if distance > DEFAULT_SERVICE_RADIUS_KM:
             return Response(
                 {'error': 'الطلب غير موجود أو خارج نطاق منطقتك.'},
                 status=status.HTTP_404_NOT_FOUND
@@ -374,8 +490,6 @@ class ProviderCustomRequestDetailView(APIView):
             ).data,
             status=status.HTTP_200_OK
         )
-
-
 # ==================== PROVIDER - OFFERS ====================
 
 class ProviderOfferCreateView(APIView):
@@ -445,14 +559,17 @@ class ProviderOfferWithdrawView(APIView):
 
 
 # ==================== PROVIDER - CHAT ====================
-
+ 
 class ProviderChatView(APIView):
     """
-    GET  /provider/custom-requests/<id>/chat/
+    GET  /provider/custom-requests/<id>/chat/?limit=30&offset=0
     POST /provider/custom-requests/<id>/chat/
     """
     permission_classes = [IsProvider]
-
+ 
+    DEFAULT_LIMIT = 30
+    MAX_LIMIT = 100
+ 
     def get_object(self, request, request_id):
         try:
             return CustomRequest.objects.get(
@@ -461,7 +578,7 @@ class ProviderChatView(APIView):
             )
         except CustomRequest.DoesNotExist:
             return None
-
+ 
     def get(self, request, request_id):
         obj = self.get_object(request, request_id)
         if not obj:
@@ -469,12 +586,36 @@ class ProviderChatView(APIView):
                 {'error': 'الطلب غير موجود أو غير مصرح لك.'},
                 status=status.HTTP_404_NOT_FOUND
             )
-        messages = obj.chat_messages.all()
+ 
+        messages_qs = obj.chat_messages.all()
+        total_count = messages_qs.count()
+ 
+        try:
+            limit = int(request.query_params.get('limit', self.DEFAULT_LIMIT))
+        except (TypeError, ValueError):
+            limit = self.DEFAULT_LIMIT
+        limit = max(1, min(limit, self.MAX_LIMIT))
+ 
+        try:
+            offset = int(request.query_params.get('offset', 0))
+        except (TypeError, ValueError):
+            offset = 0
+        offset = max(0, offset)
+ 
+        page = list(messages_qs.order_by('-created_at')[offset:offset + limit])
+        page.reverse()
+ 
         return Response(
-            RequestChatSerializer(messages, many=True).data,
+            {
+                'count': total_count,
+                'limit': limit,
+                'offset': offset,
+                'has_more': offset + limit < total_count,
+                'results': RequestChatSerializer(page, many=True).data,
+            },
             status=status.HTTP_200_OK
         )
-
+ 
     def post(self, request, request_id):
         obj = self.get_object(request, request_id)
         if not obj:
@@ -482,7 +623,7 @@ class ProviderChatView(APIView):
                 {'error': 'الطلب غير موجود أو غير مصرح لك.'},
                 status=status.HTTP_404_NOT_FOUND
             )
-
+ 
         serializer = RequestChatCreateSerializer(
             data=request.data,
             context={
@@ -497,8 +638,30 @@ class ProviderChatView(APIView):
             RequestChatSerializer(message).data,
             status=status.HTTP_201_CREATED
         )
-
-
+ 
+ 
+class ProviderChatMarkReadView(APIView):
+    """
+    POST /provider/custom-requests/<id>/chat/read/
+    """
+    permission_classes = [IsProvider]
+ 
+    def post(self, request, request_id):
+        try:
+            obj = CustomRequest.objects.get(id=request_id, accepted_provider=request.user)
+        except CustomRequest.DoesNotExist:
+            return Response(
+                {'error': 'الطلب غير موجود أو غير مصرح لك.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+ 
+        message_ids = RequestChat.mark_as_read_for_recipient(obj, recipient_type='provider')
+        _broadcast_read_receipt(obj.id, reader_type='provider', message_ids=message_ids)
+ 
+        return Response(
+            {'marked_read_count': len(message_ids)},
+            status=status.HTTP_200_OK
+        )
 # ==================== PROVIDER - COMPLETION FORM ====================
 
 class ProviderCustomCompletionFormView(APIView):
@@ -838,3 +1001,120 @@ class ProviderBookingListView(APIView):
             bookings = bookings.filter(status=status_filter)
 
         return Response(BookingAdminSerializer(bookings, many=True).data)
+    
+class NotificationListView(APIView):
+    """
+    GET /notifications/?is_read=false&limit=20&offset=0
+
+    limit  : عدد العناصر في الصفحة (افتراضي 20، أقصى حد 100)
+    offset : من فين تبدأ (افتراضي 0)
+    """
+    permission_classes = [IsAuthenticated]
+
+    DEFAULT_LIMIT = 20
+    MAX_LIMIT = 100
+
+    def get(self, request):
+        user_type = getattr(request.auth, 'payload', {}).get('user_type')
+        if user_type not in ('customer', 'provider'):
+            return Response({'error': 'غير مصرح.'}, status=status.HTTP_403_FORBIDDEN)
+
+        notifications = Notification.objects.filter(
+            recipient_type=user_type,
+            recipient_id=str(request.user.id),
+        )
+
+        is_read_param = request.query_params.get('is_read')
+        if is_read_param == 'true':
+            notifications = notifications.filter(is_read=True)
+        elif is_read_param == 'false':
+            notifications = notifications.filter(is_read=False)
+
+        total_count = notifications.count()
+
+        # limit/offset مع حماية من قيم غلط أو كبيرة أوي
+        try:
+            limit = int(request.query_params.get('limit', self.DEFAULT_LIMIT))
+        except (TypeError, ValueError):
+            limit = self.DEFAULT_LIMIT
+        limit = max(1, min(limit, self.MAX_LIMIT))
+
+        try:
+            offset = int(request.query_params.get('offset', 0))
+        except (TypeError, ValueError):
+            offset = 0
+        offset = max(0, offset)
+
+        page = notifications[offset:offset + limit]
+
+        return Response(
+            {
+                'count': total_count,
+                'limit': limit,
+                'offset': offset,
+                'has_more': offset + limit < total_count,
+                'results': NotificationSerializer(page, many=True).data,
+            },
+            status=status.HTTP_200_OK
+        )
+    
+
+class NotificationUnreadCountView(APIView):
+    """
+    GET /notifications/unread-count/   ← لعمل الـ badge على أيقونة الجرس
+    """
+    permission_classes = [IsAuthenticated]
+ 
+    def get(self, request):
+        user_type = getattr(request.auth, 'payload', {}).get('user_type')
+        if user_type not in ('customer', 'provider'):
+            return Response({'error': 'غير مصرح.'}, status=status.HTTP_403_FORBIDDEN)
+ 
+        count = Notification.objects.filter(
+            recipient_type=user_type,
+            recipient_id=str(request.user.id),
+            is_read=False,
+        ).count()
+ 
+        return Response({'unread_count': count}, status=status.HTTP_200_OK)
+ 
+ 
+class NotificationMarkReadView(APIView):
+    """
+    PATCH /notifications/<notification_id>/read/
+    """
+    permission_classes = [IsAuthenticated]
+ 
+    def patch(self, request, notification_id):
+        user_type = getattr(request.auth, 'payload', {}).get('user_type')
+        try:
+            notification = Notification.objects.get(
+                id=notification_id,
+                recipient_type=user_type,
+                recipient_id=str(request.user.id),
+            )
+        except Notification.DoesNotExist:
+            return Response({'error': 'الإشعار غير موجود.'}, status=status.HTTP_404_NOT_FOUND)
+ 
+        notification.mark_as_read()
+        return Response(NotificationSerializer(notification).data, status=status.HTTP_200_OK)
+ 
+ 
+class NotificationMarkAllReadView(APIView):
+    """
+    POST /notifications/mark-all-read/
+    """
+    permission_classes = [IsAuthenticated]
+ 
+    def post(self, request):
+        user_type = getattr(request.auth, 'payload', {}).get('user_type')
+        if user_type not in ('customer', 'provider'):
+            return Response({'error': 'غير مصرح.'}, status=status.HTTP_403_FORBIDDEN)
+ 
+        Notification.objects.filter(
+            recipient_type=user_type,
+            recipient_id=str(request.user.id),
+            is_read=False,
+        ).update(is_read=True, read_at=timezone.now())
+ 
+        return Response({'message': 'تم تعليم الكل كمقروء.'}, status=status.HTTP_200_OK)
