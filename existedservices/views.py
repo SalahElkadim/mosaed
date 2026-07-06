@@ -3,7 +3,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAdminUser
 from accounts.permissions import IsCustomer,IsProviderOrAdmin   
-from .models import ExistedService, ServiceAttribute, PreviousWork,Booking, ExistedService, ServiceReview, ServiceProvider, Warranty
+from .models import ExistedService, ServiceAttribute, PreviousWork,Booking, ServiceReview, ServiceProvider, Warranty
 from utils.cloudinary import upload_image, upload_video
 from .serializers import (
     # Service
@@ -31,7 +31,52 @@ from .serializers import (
 from .models import ServiceCompletionForm, CompletionMedia
 
 from django.db.models import Avg, Count
+import base64
+import uuid as uuid_lib
+from django.core.files.base import ContentFile
 
+
+def _decode_base64_file(raw_value, default_ext='jpg'):
+    """بيحول base64 string (مع أو من غير data URI) لـ ContentFile قابل للرفع."""
+    if ';base64,' in raw_value:
+        header, raw_value = raw_value.split(';base64,', 1)
+        ext = header.split('/')[-1] if '/' in header else default_ext
+    else:
+        ext = default_ext
+
+    try:
+        decoded = base64.b64decode(raw_value)
+    except (TypeError, ValueError, base64.binascii.Error):
+        raise ValueError("صيغة الملف (base64) غير صحيحة.")
+
+    return ContentFile(decoded, name=f"{uuid_lib.uuid4()}.{ext}")
+
+
+def _resolve_media_upload(request, field_name, media_type, folder):
+    """
+    بيرجع (media_url, thumbnail_url) لأي media (image/video)، سواء جاي:
+    - multipart:  request.FILES[field_name]
+    - base64:     request.data[field_name] كـ string base64 (مش بادئ بـ http)
+    بيرجع (None, None) لو مفيش حاجة اتبعتت خالص.
+    """
+    file_obj = None
+
+    if field_name in request.FILES:
+        file_obj = request.FILES[field_name]
+    else:
+        raw_value = request.data.get(field_name)
+        if raw_value and isinstance(raw_value, str) and not raw_value.startswith('http'):
+            default_ext = 'mp4' if media_type == 'video' else 'jpg'
+            file_obj = _decode_base64_file(raw_value, default_ext=default_ext)
+
+    if file_obj is None:
+        return None, None
+
+    if media_type == 'video':
+        result = upload_video(file_obj, folder=folder)
+        return result['url'], result['thumbnail']
+    else:
+        return upload_image(file_obj, folder=folder), None
 # ==================== CLIENT - SERVICE VIEWS ====================
 
 class ExistedServiceListView(APIView):
@@ -668,36 +713,23 @@ class ProviderCompletionMediaView(APIView):
     def post(self, request, booking_id):
         form = self.get_form(request, booking_id)
         if not form:
-            return Response(
-                {'error': 'Completion form not found.'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            return Response({'error': 'Completion form not found.'}, status=status.HTTP_404_NOT_FOUND)
         if form.is_finished:
-            return Response(
-                {'error': 'Cannot add media to a finished form.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        if 'media' not in request.FILES:
-            return Response(
-                {'error': 'media file is required.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({'error': 'Cannot add media to a finished form.'}, status=status.HTTP_400_BAD_REQUEST)
 
         media_type = request.data.get('media_type')
         if media_type not in ('image', 'video'):
-            return Response(
-                {'error': 'media_type must be image or video.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({'error': 'media_type must be image or video.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        if media_type == 'video':
-            result = upload_video(request.FILES['media'], folder="completion_media")
-            media_url     = result['url']
-            thumbnail_url = result['thumbnail']
-        else:
-            media_url     = upload_image(request.FILES['media'], folder="completion_media")
-            thumbnail_url = None
+        try:
+            media_url, thumbnail_url = _resolve_media_upload(
+                request, field_name='media', media_type=media_type, folder="completion_media"
+            )
+        except ValueError as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not media_url:
+            return Response({'error': 'media file is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
         data = request.data.copy()
         data['media_url']     = media_url
@@ -706,10 +738,7 @@ class ProviderCompletionMediaView(APIView):
         serializer = CompletionMediaWriteSerializer(data=data)
         serializer.is_valid(raise_exception=True)
         media = serializer.save(form=form)
-        return Response(
-            CompletionMediaSerializer(media).data,
-            status=status.HTTP_201_CREATED
-        )
+        return Response(CompletionMediaSerializer(media).data, status=status.HTTP_201_CREATED)
 
     def delete(self, request, booking_id, media_id):
         form = self.get_form(request, booking_id)

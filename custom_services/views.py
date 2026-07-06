@@ -39,7 +39,53 @@ from channels.layers import get_channel_layer
 from .consumers import chat_group
 from django.utils import timezone
 # ==================== HELPER ====================
+import base64
+import uuid as uuid_lib
+from django.core.files.base import ContentFile
 
+
+def _decode_base64_file(raw_value, default_ext='jpg'):
+    """بيحول base64 string (مع أو من غير data URI) لـ ContentFile قابل للرفع."""
+    if ';base64,' in raw_value:
+        header, raw_value = raw_value.split(';base64,', 1)
+        ext = header.split('/')[-1] if '/' in header else default_ext
+    else:
+        ext = default_ext
+
+    try:
+        decoded = base64.b64decode(raw_value)
+    except (TypeError, ValueError, base64.binascii.Error):
+        raise ValueError("صيغة الملف (base64) غير صحيحة.")
+
+    return ContentFile(decoded, name=f"{uuid_lib.uuid4()}.{ext}")
+
+
+def _resolve_media_upload(request, field_name, media_type, folder):
+    """
+    بيرجع (media_url, thumbnail_url) لأي media (image/video)، سواء جاي:
+    - multipart:  request.FILES[field_name]
+    - base64:     request.data[field_name] كـ string base64 (مش بادئ بـ http)
+    بيرجع (None, None) لو مفيش حاجة اتبعتت خالص.
+    """
+    file_obj = None
+
+    if field_name in request.FILES:
+        file_obj = request.FILES[field_name]
+    else:
+        raw_value = request.data.get(field_name)
+        if raw_value and isinstance(raw_value, str) and not raw_value.startswith('http'):
+            default_ext = 'mp4' if media_type == 'video' else 'jpg'
+            file_obj = _decode_base64_file(raw_value, default_ext=default_ext)
+
+    if file_obj is None:
+        return None, None
+
+    if media_type == 'video':
+        result = upload_video(file_obj, folder=folder)
+        return result['url'], result['thumbnail']
+    else:
+        return upload_image(file_obj, folder=folder), None 
+    
 def _check_and_expire(custom_request):
     """Lazy expiry check — يُستدعى عند جلب أي طلب."""
     custom_request.check_and_expire()
@@ -62,6 +108,39 @@ def _broadcast_read_receipt(request_id, reader_type, message_ids):
             },
         }
     )
+
+import base64
+import uuid as uuid_lib
+from django.core.files.base import ContentFile
+
+
+def _resolve_uploaded_image(request, folder):
+    """
+    بيرجع Cloudinary URL لو فيه صورة مبعوتة (multipart أو base64)، وإلا None.
+    - Multipart: request.FILES['image']
+    - Base64: request.data['image'] = "data:image/png;base64,...." أو base64 خام
+    """
+    if 'image' in request.FILES:
+        return upload_image(request.FILES['image'], folder=folder)
+
+    image_field = request.data.get('image')
+    if image_field and isinstance(image_field, str) and not image_field.startswith('http'):
+        # لو جاي بصيغة data URI: data:image/jpeg;base64,xxxx
+        if ';base64,' in image_field:
+            header, image_field = image_field.split(';base64,', 1)
+            ext = header.split('/')[-1] if '/' in header else 'jpg'
+        else:
+            ext = 'jpg'
+
+        try:
+            decoded = base64.b64decode(image_field)
+        except (TypeError, ValueError, base64.binascii.Error):
+            raise ValueError("صيغة الصورة (base64) غير صحيحة.")
+
+        file = ContentFile(decoded, name=f"{uuid_lib.uuid4()}.{ext}")
+        return upload_image(file, folder=folder)
+
+    return None
 # ==================== CUSTOMER VIEWS ====================
 
 class CustomerCustomRequestListView(APIView):
@@ -97,8 +176,17 @@ class CustomerCustomRequestListView(APIView):
         )
 
     def post(self, request):
+        data = request.data.copy()
+        try:
+            image_url = _resolve_uploaded_image(request, folder="custom_requests")
+        except ValueError as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        if image_url:
+            data['image'] = image_url
+
         serializer = CustomRequestCreateSerializer(
-            data=request.data,
+            data=data,
             context={'request': request}
         )
         serializer.is_valid(raise_exception=True)
@@ -139,21 +227,24 @@ class CustomerCustomRequestDetailView(APIView):
     def patch(self, request, request_id):
         obj = self.get_object(request, request_id)
         if not obj:
-            return Response(
-                {'error': 'الطلب غير موجود.'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            return Response({'error': 'الطلب غير موجود.'}, status=status.HTTP_404_NOT_FOUND)
 
-        # التعديل مسموح فقط على الطلبات النشطة
         if obj.status not in ('published', 'offers_received'):
             return Response(
                 {'error': 'لا يمكن تعديل هذا الطلب في وضعه الحالي.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        serializer = CustomRequestUpdateSerializer(
-            obj, data=request.data, partial=True
-        )
+        data = request.data.copy()
+        try:
+            image_url = _resolve_uploaded_image(request, folder="custom_requests")
+        except ValueError as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        if image_url:
+            data['image'] = image_url
+
+        serializer = CustomRequestUpdateSerializer(obj, data=data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(
@@ -750,36 +841,23 @@ class ProviderCustomCompletionMediaView(APIView):
     def post(self, request, request_id):
         form = self.get_form(request, request_id)
         if not form:
-            return Response(
-                {'error': 'نموذج الإتمام غير موجود.'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            return Response({'error': 'نموذج الإتمام غير موجود.'}, status=status.HTTP_404_NOT_FOUND)
         if form.is_finished:
-            return Response(
-                {'error': 'لا يمكن إضافة وسائط لنموذج مكتمل.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        if 'media' not in request.FILES:
-            return Response(
-                {'error': 'media file is required.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({'error': 'لا يمكن إضافة وسائط لنموذج مكتمل.'}, status=status.HTTP_400_BAD_REQUEST)
 
         media_type = request.data.get('media_type')
         if media_type not in ('image', 'video'):
-            return Response(
-                {'error': 'media_type must be image or video.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({'error': 'media_type must be image or video.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        if media_type == 'video':
-            result = upload_video(request.FILES['media'], folder="completion_media")
-            media_url     = result['url']
-            thumbnail_url = result['thumbnail']
-        else:
-            media_url     = upload_image(request.FILES['media'], folder="completion_media")
-            thumbnail_url = None
+        try:
+            media_url, thumbnail_url = _resolve_media_upload(
+                request, field_name='media', media_type=media_type, folder="completion_media"
+            )
+        except ValueError as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not media_url:
+            return Response({'error': 'media file is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
         data = request.data.copy()
         data['media_url']     = media_url
@@ -788,10 +866,7 @@ class ProviderCustomCompletionMediaView(APIView):
         serializer = CompletionMediaWriteSerializer(data=data)
         serializer.is_valid(raise_exception=True)
         media = serializer.save(form=form)
-        return Response(
-            CompletionMediaSerializer(media).data,
-            status=status.HTTP_201_CREATED
-        )
+        return Response(CompletionMediaSerializer(media).data, status=status.HTTP_201_CREATED)
 
     def delete(self, request, request_id, media_id):
         form = self.get_form(request, request_id)
