@@ -642,3 +642,54 @@ class PreviousWorkWriteSerializer(serializers.ModelSerializer):
             completion_form=form,
             **validated_data
         )
+    
+class ProviderCompletionFormListItemSerializer(serializers.Serializer):
+    attribute_id   = serializers.CharField(source='attribute.id')
+    attribute_name = serializers.CharField(source='attribute.name')
+    unit_name      = serializers.CharField(source='attribute.unit_name')
+    quantity_name  = serializers.CharField(source='attribute.quantity_name')
+    value          = serializers.DecimalField(max_digits=10, decimal_places=2)
+
+
+class ProviderCompletionFormListSerializer(serializers.Serializer):
+    id          = serializers.UUIDField()
+    booking_id  = serializers.SerializerMethodField()
+    service_title = serializers.SerializerMethodField()
+    customer_address = serializers.SerializerMethodField()
+    is_finished = serializers.BooleanField()
+    finished_at = serializers.DateTimeField()
+    created_at  = serializers.DateTimeField()
+    items       = serializers.SerializerMethodField()
+
+    def get_booking_id(self, obj):
+        return str(obj.booking_id) if obj.booking_id else None
+
+    def get_service_title(self, obj):
+        if obj.booking and obj.booking.service:
+            return obj.booking.service.title
+        return None
+
+    def get_customer_address(self, obj):
+        address = obj.booking.address if obj.booking else None
+        if not address:
+            return None
+
+        return {
+            'id': str(address.id),
+            'city': address.city.name if address.city else None,
+            'region': address.region.name if address.region else None,
+            'district': address.district,
+            'street': address.street,
+            'building_no': address.building_no,
+            'floor_no': address.floor_no,
+            'apartment_no': address.apartment_no,
+            'label': address.label,
+            'lat': str(address.lat) if address.lat is not None else None,
+            'lng': str(address.lng) if address.lng is not None else None,
+        }
+
+    def get_items(self, obj):
+        if not obj.booking:
+            return []
+        items = obj.booking.items.select_related('attribute').all()
+        return ProviderCompletionFormListItemSerializer(items, many=True).data

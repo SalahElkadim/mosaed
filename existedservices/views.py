@@ -11,7 +11,7 @@ from .serializers import (
     ExistedServiceDetailSerializer,
     ExistedServiceAdminListSerializer,PreviousWorkSerializer,
     ExistedServiceAdminDetailSerializer,
-    ExistedServiceWriteSerializer,WarrantyWriteSerializer,PreviousWorkWriteSerializer,
+    ExistedServiceWriteSerializer,WarrantyWriteSerializer,PreviousWorkWriteSerializer,ProviderCompletionFormListSerializer,
     # Attribute
     ServiceAttributeAdminSerializer,
     ServiceAttributeWriteSerializer,
@@ -304,7 +304,7 @@ class AdminBookingListView(APIView):
         return Response(BookingAdminSerializer(bookings, many=True).data)
     
 class AdminBookingDetailView(APIView):
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsProviderOrAdmin]
 
     def get_object(self, booking_id):
         try:
@@ -1068,3 +1068,32 @@ class ProviderBookingStatusView(APIView):
         booking.status = serializer.validated_data['status']
         booking.save(update_fields=['status'])
         return Response(BookingAdminSerializer(booking).data)
+    
+
+class ProviderCompletionFormListView(APIView):
+    permission_classes = [IsProvider]
+
+    def get(self, request):
+        is_finished_param = request.query_params.get('is_finished')
+
+        forms = ServiceCompletionForm.objects.filter(
+            booking__isnull=False,
+            booking__provider=request.user,
+        ).select_related(
+            'booking__service',
+            'booking__address',
+            'booking__address__city',
+            'booking__address__region',
+        ).prefetch_related(
+            'booking__items__attribute'
+        ).order_by('-created_at')
+
+        if is_finished_param == 'true':
+            forms = forms.filter(is_finished=True)
+        elif is_finished_param == 'false':
+            forms = forms.filter(is_finished=False)
+
+        return Response(
+            ProviderCompletionFormListSerializer(forms, many=True).data,
+            status=status.HTTP_200_OK
+        )

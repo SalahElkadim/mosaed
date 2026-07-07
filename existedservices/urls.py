@@ -23,7 +23,7 @@ from .views import (
     ProviderCompletionFormView,
     ProviderCompletionMediaView,
     CouponValidateView,
-    AdminCouponListView,AdminCouponDetailView,AdminAvailableProvidersForServiceView
+    AdminCouponListView,AdminCouponDetailView,AdminAvailableProvidersForServiceView,ProviderCompletionFormListView
 )
 
 urlpatterns = [
@@ -44,7 +44,7 @@ urlpatterns = [
     path('bookings/<uuid:booking_id>/', CustomerBookingDetailView.as_view(), name='customer-booking-detail'),
     path('bookings/<uuid:booking_id>/cancel/', CustomerBookingDetailView.as_view(), name='customer-booking-cancel'),
 
-    # ==================== ADMIN - BOOKINGS ====================
+    # ==================== ADMIN - BOOKINGS ====================0
     path('admin/bookings/', AdminBookingListView.as_view(), name='admin-booking-list'),
     path('admin/bookings/<uuid:booking_id>/', AdminBookingDetailView.as_view(), name='admin-booking-detail'),
     path('admin/bookings/<uuid:booking_id>/status/', AdminBookingStatusView.as_view(), name='admin-booking-status'),
@@ -89,6 +89,8 @@ urlpatterns = [
      path('bookings/<uuid:booking_id>/previous-work/', ProviderPreviousWorkView.as_view()),
      path('provider/bookings/<uuid:booking_id>/', ProviderBookingDetailView.as_view()),
      path('provider/bookings/<uuid:booking_id>/status/', ProviderBookingStatusView.as_view()),
+     path('provider/completion-forms/', ProviderCompletionFormListView.as_view(), name='provider-completion-form-list'),
+
 
 
     
