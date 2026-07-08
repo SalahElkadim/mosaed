@@ -36,6 +36,28 @@ import uuid as uuid_lib
 from django.core.files.base import ContentFile
 
 
+def _resolve_image_field(request, field_name, folder):
+    """
+    بيرجع Cloudinary URL للصورة سواء جاية:
+    - multipart:  request.FILES[field_name]
+    - base64:     request.data[field_name] (مع أو من غير data URI)
+    - URL جاهز:   request.data[field_name] لو بادئ بـ http
+    بيرجع None لو مفيش حاجة اتبعتت خالص لـ field ده.
+    """
+    if field_name in request.FILES:
+        return upload_image(request.FILES[field_name], folder=folder)
+
+    raw_value = request.data.get(field_name)
+    if not raw_value or not isinstance(raw_value, str):
+        return None
+
+    if raw_value.startswith('http'):
+        return raw_value  # URL جاهز
+
+    file_obj = _decode_base64_file(raw_value, default_ext='jpg')
+    return upload_image(file_obj, folder=folder)
+
+
 def _decode_base64_file(raw_value, default_ext='jpg'):
     """بيحول base64 string (مع أو من غير data URI) لـ ContentFile قابل للرفع."""
     if ';base64,' in raw_value:
@@ -978,16 +1000,19 @@ class ProviderPreviousWorkView(APIView):
         form = self.get_form_or_work(request, booking_id, need='form')
         if not form:
             return Response({'error': 'Completion form not found.'}, status=404)
-        data = {}
-        if 'before_image' in request.FILES:
-            data['before_image'] = upload_image(request.FILES['before_image'], folder="previous_works")
-        elif 'before_image' in request.data:
-            data['before_image'] = request.data['before_image']  # URL مباشرة
 
-        if 'after_image' in request.FILES:
-            data['after_image'] = upload_image(request.FILES['after_image'], folder="previous_works")
-        elif 'after_image' in request.data:
-            data['after_image'] = request.data['after_image']
+        try:
+            before_url = _resolve_image_field(request, 'before_image', folder="previous_works")
+            after_url  = _resolve_image_field(request, 'after_image', folder="previous_works")
+        except ValueError as e:
+            return Response({'error': str(e)}, status=400)
+
+        data = {}
+        if before_url:
+            data['before_image'] = before_url
+        if after_url:
+            data['after_image'] = after_url
+
         serializer = PreviousWorkWriteSerializer(data=data, context={'form': form})
         serializer.is_valid(raise_exception=True)
         work = serializer.save()
@@ -997,16 +1022,19 @@ class ProviderPreviousWorkView(APIView):
         work = self.get_form_or_work(request, booking_id, need='work')
         if not work:
             return Response({'error': 'Previous work not found.'}, status=404)
-        data = {}
-        if 'before_image' in request.FILES:
-            data['before_image'] = upload_image(request.FILES['before_image'], folder="previous_works")
-        elif 'before_image' in request.data:
-            data['before_image'] = request.data['before_image']  # URL مباشرة
 
-        if 'after_image' in request.FILES:
-            data['after_image'] = upload_image(request.FILES['after_image'], folder="previous_works")
-        elif 'after_image' in request.data:
-            data['after_image'] = request.data['after_image']
+        try:
+            before_url = _resolve_image_field(request, 'before_image', folder="previous_works")
+            after_url  = _resolve_image_field(request, 'after_image', folder="previous_works")
+        except ValueError as e:
+            return Response({'error': str(e)}, status=400)
+
+        data = {}
+        if before_url:
+            data['before_image'] = before_url
+        if after_url:
+            data['after_image'] = after_url
+
         for field, value in data.items():
             setattr(work, field, value)
         work.save()
