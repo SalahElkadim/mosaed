@@ -413,3 +413,34 @@ class DeviceTokenRegisterSerializer(serializers.Serializer):
         if not value.strip():
             raise serializers.ValidationError("التوكن لا يمكن أن يكون فارغاً.")
         return value.strip()
+    
+
+class ProviderMyOfferSerializer(serializers.ModelSerializer):
+    """
+    للفني — يشوف كل عروضه (على كل الطلبات) وحالة كل عرض:
+    pending / accepted / rejected / withdrawn
+    """
+    request_id           = serializers.UUIDField(source='request.id', read_only=True)
+    request_title        = serializers.CharField(source='request.title', read_only=True)
+    request_status       = serializers.CharField(source='request.status', read_only=True)
+    specialization_name  = serializers.CharField(
+        source='request.specialization.name', read_only=True
+    )
+    city     = serializers.CharField(source='request.address.city',     read_only=True)
+    region   = serializers.CharField(source='request.address.region',   read_only=True)
+    is_accepted = serializers.SerializerMethodField()
+
+    def get_is_accepted(self, obj):
+        return obj.status == 'accepted'
+
+    class Meta:
+        model  = ServiceOffer
+        fields = [
+            'id',
+            'request_id', 'request_title', 'request_status',
+            'specialization_name', 'city', 'region',
+            'provider_price', 'final_price', 'note',
+            'status', 'is_accepted',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = fields

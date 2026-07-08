@@ -26,7 +26,7 @@ from .views import (
     NotificationMarkReadView,
     NotificationMarkAllReadView,
     CustomerChatMarkReadView,
-    ProviderChatMarkReadView,
+    ProviderChatMarkReadView,ProviderMyOffersListView
 )
 
 urlpatterns = [
@@ -69,9 +69,14 @@ urlpatterns = [
          ProviderOfferCreateView.as_view(),
          name='provider-offer-create'),
 
+
+    path('provider/offers/', ProviderMyOffersListView.as_view(), name='provider-my-offers'),
     path('provider/offers/<uuid:offer_id>/',
          ProviderOfferWithdrawView.as_view(),
          name='provider-offer-withdraw'),
+
+     
+
 
     path('provider/custom-requests/<uuid:request_id>/chat/',
          ProviderChatView.as_view(),

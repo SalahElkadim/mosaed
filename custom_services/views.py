@@ -23,7 +23,7 @@ from .serializers import (
     ServiceOfferAdminSerializer,
     RequestChatSerializer,
     RequestChatCreateSerializer,
-    PlatformSettingsSerializer,NotificationSerializer,DeviceTokenRegisterSerializer
+    PlatformSettingsSerializer,NotificationSerializer,DeviceTokenRegisterSerializer,ProviderMyOfferSerializer
 )
 from existedservices.serializers import (
     ServiceCompletionFormSerializer,
@@ -1239,3 +1239,28 @@ class DeviceTokenView(APIView):
         DeviceToken.objects.filter(token=token).delete()
         return Response({'message': 'تم حذف التوكن.'}, status=status.HTTP_200_OK)
  
+
+
+class ProviderMyOffersListView(APIView):
+    """
+    GET /provider/offers/?status=pending
+    الفني يشوف كل العروض اللي بعتها هو، بحالتها (accepted/rejected/pending/withdrawn)
+    """
+    permission_classes = [IsProvider]
+
+    def get(self, request):
+        status_filter = request.query_params.get('status')
+
+        offers = ServiceOffer.objects.filter(
+            provider=request.user
+        ).select_related(
+            'request', 'request__specialization', 'request__address'
+        ).order_by('-created_at')
+
+        if status_filter in ('pending', 'accepted', 'rejected', 'withdrawn'):
+            offers = offers.filter(status=status_filter)
+
+        return Response(
+            ProviderMyOfferSerializer(offers, many=True).data,
+            status=status.HTTP_200_OK
+        )
