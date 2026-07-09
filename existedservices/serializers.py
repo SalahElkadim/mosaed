@@ -459,7 +459,7 @@ class CompletionMediaWriteSerializer(serializers.ModelSerializer):
         return attrs
 
 class ServiceCompletionFormSerializer(serializers.ModelSerializer):
-    """للعرض — فني وأدمن"""
+    """للعرض — فني وأدمن وعميل"""
     media         = CompletionMediaSerializer(many=True, read_only=True)
     booking_id    = serializers.UUIDField(source='booking.id', read_only=True)
     previous_work = serializers.SerializerMethodField()
@@ -468,17 +468,11 @@ class ServiceCompletionFormSerializer(serializers.ModelSerializer):
         model  = ServiceCompletionForm
         fields = [
             'id', 'booking_id', 'notes',
+            'status', 'started_at',                      # ← جديد
             'is_finished', 'finished_at',
             'media', 'previous_work', 'created_at', 'updated_at'
         ]
         read_only_fields = fields
-
-    def get_previous_work(self, obj):
-        try:
-            return PreviousWorkSerializer(obj.previous_work).data
-        except PreviousWork.DoesNotExist:
-            return None
-
 
 class ServiceCompletionFormUpdateSerializer(serializers.ModelSerializer):
     """الفني يضيف ملاحظات ويعمل finish"""

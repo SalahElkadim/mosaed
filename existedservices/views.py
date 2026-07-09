@@ -1001,6 +1001,13 @@ class ProviderPreviousWorkView(APIView):
         if not form:
             return Response({'error': 'Completion form not found.'}, status=404)
 
+        # ← لازم العميل يكون أكد وصول الفني الأول
+        if form.status != 'provider_arrived':
+            return Response(
+                {'error': 'لا يمكن رفع before_image قبل تأكيد العميل وصول الفني.'},
+                status=400
+            )
+
         if 'after_image' in request.data or 'after_image' in request.FILES:
             return Response(
                 {'error': 'لا يمكن رفع after_image عند بدء الشغل. استخدم PATCH بعد إنهاء الشغل.'},
@@ -1051,7 +1058,6 @@ class ProviderPreviousWorkView(APIView):
             return Response({'error': 'Previous work not found.'}, status=404)
         work.delete()
         return Response({'message': 'Previous work deleted successfully.'})
-    
 
 from accounts.permissions import IsProvider
 
@@ -1128,5 +1134,43 @@ class ProviderCompletionFormListView(APIView):
 
         return Response(
             ProviderCompletionFormListSerializer(forms, many=True).data,
+            status=status.HTTP_200_OK
+        )
+    
+
+from django.utils import timezone
+
+class CustomerConfirmProviderArrivalView(APIView):
+    """
+    POST /bookings/<booking_id>/provider-arrived/
+    العميل يأكد إن الفني وصل → status يتحول لـ provider_arrived
+    و started_at بياخد وقت وتاريخ اللحظة دي.
+    """
+    permission_classes = [IsCustomer]
+
+    def post(self, request, booking_id):
+        try:
+            form = ServiceCompletionForm.objects.get(
+                booking__id=booking_id,
+                booking__customer=request.user
+            )
+        except ServiceCompletionForm.DoesNotExist:
+            return Response(
+                {'error': 'Completion form not found.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        if form.status == 'provider_arrived':
+            return Response(
+                {'error': 'Provider arrival already confirmed.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        form.status     = 'provider_arrived'
+        form.started_at = timezone.now()
+        form.save(update_fields=['status', 'started_at'])
+
+        return Response(
+            ServiceCompletionFormSerializer(form).data,
             status=status.HTTP_200_OK
         )

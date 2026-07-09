@@ -254,18 +254,26 @@ class ServiceProvider(models.Model):
     
 
 class ServiceCompletionForm(models.Model):
+
+    STATUS_CHOICES = [
+        ('waiting', 'Waiting'),
+        ('provider_arrived', 'Provider Arrived'),
+    ]
+
     id      = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     booking = models.OneToOneField(
         Booking,
         on_delete=models.CASCADE,
         related_name='completion_form'
     )
-    custom_request = models.OneToOneField(  # ← جديد
-         'custom_services.CustomRequest',
+    custom_request = models.OneToOneField(
+        'custom_services.CustomRequest',
         on_delete=models.CASCADE,
         related_name='completion_form',
-         null=True, blank=True
+        null=True, blank=True
     )
+    status      = models.CharField(max_length=20, choices=STATUS_CHOICES, default='waiting')   # ← جديد
+    started_at  = models.DateTimeField(null=True, blank=True)                                   # ← جديد
     notes       = models.TextField(blank=True)
     is_finished = models.BooleanField(default=False)
     finished_at = models.DateTimeField(null=True, blank=True)
@@ -279,7 +287,6 @@ class ServiceCompletionForm(models.Model):
 
     def __str__(self):
         return f"CompletionForm for Booking#{self.booking.id} — finished={self.is_finished}"
-
 
 class CompletionMedia(models.Model):
     MEDIA_TYPE_CHOICES = [
