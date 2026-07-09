@@ -31,7 +31,7 @@ from existedservices.serializers import (
     CompletionMediaWriteSerializer,
     CompletionMediaSerializer,
     BookingStatusUpdateSerializer,  # Added import
-    BookingAdminSerializer # Import added for fixing the issue
+    BookingAdminSerializer ,ServiceOfferUpdateSerializer
 )
 
 from asgiref.sync import async_to_sync
@@ -1262,5 +1262,79 @@ class ProviderMyOffersListView(APIView):
 
         return Response(
             ProviderMyOfferSerializer(offers, many=True).data,
+            status=status.HTTP_200_OK
+        )
+    
+class ProviderOfferWithdrawView(APIView):
+    """
+    GET    /provider/offers/<offer_id>/   ← الفني يشوف تفاصيل عرضه
+    PATCH  /provider/offers/<offer_id>/   ← الفني يعدل عرضه (لو لسه pending)
+    DELETE /provider/offers/<offer_id>/   ← الفني يسحب عرضه
+    """
+    permission_classes = [IsProvider]
+
+    def get_object(self, request, offer_id):
+        try:
+            return ServiceOffer.objects.select_related(
+                'request', 'request__specialization', 'request__address'
+            ).get(id=offer_id, provider=request.user)
+        except ServiceOffer.DoesNotExist:
+            return None
+
+    def get(self, request, offer_id):
+        offer = self.get_object(request, offer_id)
+        if not offer:
+            return Response(
+                {'error': 'العرض غير موجود.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        return Response(
+            ProviderMyOfferSerializer(offer).data,
+            status=status.HTTP_200_OK
+        )
+
+    def patch(self, request, offer_id):
+        offer = self.get_object(request, offer_id)
+        if not offer:
+            return Response(
+                {'error': 'العرض غير موجود.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        serializer = ServiceOfferUpdateSerializer(
+            data=request.data,
+            context={'offer': offer}
+        )
+        serializer.is_valid(raise_exception=True)
+        updated_offer = serializer.update(offer, serializer.validated_data)
+        return Response(
+            ProviderMyOfferSerializer(updated_offer).data,
+            status=status.HTTP_200_OK
+        )
+
+    def delete(self, request, offer_id):
+        try:
+            offer = ServiceOffer.objects.get(
+                id=offer_id,
+                provider=request.user,
+                status='pending'
+            )
+        except ServiceOffer.DoesNotExist:
+            return Response(
+                {'error': 'العرض غير موجود أو لا يمكن سحبه.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        offer.status = 'withdrawn'
+        offer.save(update_fields=['status'])
+
+        custom_request = offer.request
+        if not custom_request.offers.filter(status='pending').exists():
+            if custom_request.status == 'offers_received':
+                custom_request.status = 'published'
+                custom_request.save(update_fields=['status'])
+
+        return Response(
+            {'message': 'تم سحب العرض بنجاح.'},
             status=status.HTTP_200_OK
         )

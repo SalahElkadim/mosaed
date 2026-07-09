@@ -444,3 +444,30 @@ class ProviderMyOfferSerializer(serializers.ModelSerializer):
             'created_at', 'updated_at',
         ]
         read_only_fields = fields
+
+
+class ServiceOfferUpdateSerializer(serializers.Serializer):
+    """الفني يعدل عرضه، بس لو لسه pending"""
+    provider_price = serializers.DecimalField(max_digits=10, decimal_places=2, required=False)
+    note           = serializers.CharField(required=False, allow_blank=True)
+
+    def validate_provider_price(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("السعر يجب أن يكون أكبر من 0.")
+        return value
+
+    def validate(self, attrs):
+        offer = self.context['offer']
+        if offer.status != 'pending':
+            raise serializers.ValidationError(
+                "لا يمكن تعديل العرض بعد أن تغيرت حالته."
+            )
+        if not attrs:
+            raise serializers.ValidationError("لا توجد بيانات للتعديل.")
+        return attrs
+
+    def update(self, instance, validated_data):
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save(update_fields=list(validated_data.keys()) + ['updated_at'])
+        return instance
