@@ -392,8 +392,8 @@ class PreviousWork(models.Model):
         related_name='previous_work',
         null=True, blank=True   # null لأنه بيتعمل بعد اتمام الخدمة
     )
-    before_image = models.URLField()
-    after_image  = models.URLField()
+    before_image = models.URLField(null=True, blank=True)
+    after_image  = models.URLField(null=True, blank=True)
     created_at   = models.DateTimeField(auto_now_add=True)
 
     class Meta:

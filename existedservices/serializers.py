@@ -627,17 +627,23 @@ class PreviousWorkSerializer(serializers.ModelSerializer):
 
 
 class PreviousWorkWriteSerializer(serializers.ModelSerializer):
-    """الفني/الأدمن يضيف عمل سابق على نموذج اتمام الخدمة"""
     class Meta:
         model  = PreviousWork
         fields = ['before_image', 'after_image']
+        extra_kwargs = {
+            'before_image': {'required': False},
+            'after_image':  {'required': False},
+        }
 
     def validate(self, attrs):
         form = self.context['form']
-        # كل form ممكن يكون فيه previous_work واحد بس (OneToOne)
         if hasattr(form, 'previous_work'):
             raise serializers.ValidationError(
                 "This completion form already has a previous work entry."
+            )
+        if not self.instance and not attrs.get('before_image'):
+            raise serializers.ValidationError(
+                "before_image is required when creating a previous work entry."
             )
         return attrs
 
@@ -648,7 +654,7 @@ class PreviousWorkWriteSerializer(serializers.ModelSerializer):
             completion_form=form,
             **validated_data
         )
-    
+
 class ProviderCompletionFormListItemSerializer(serializers.Serializer):
     attribute_id   = serializers.CharField(source='attribute.id')
     attribute_name = serializers.CharField(source='attribute.name')

@@ -1001,19 +1001,24 @@ class ProviderPreviousWorkView(APIView):
         if not form:
             return Response({'error': 'Completion form not found.'}, status=404)
 
+        if 'after_image' in request.data or 'after_image' in request.FILES:
+            return Response(
+                {'error': 'لا يمكن رفع after_image عند بدء الشغل. استخدم PATCH بعد إنهاء الشغل.'},
+                status=400
+            )
+
         try:
             before_url = _resolve_image_field(request, 'before_image', folder="previous_works")
-            after_url  = _resolve_image_field(request, 'after_image', folder="previous_works")
         except ValueError as e:
             return Response({'error': str(e)}, status=400)
 
-        data = {}
-        if before_url:
-            data['before_image'] = before_url
-        if after_url:
-            data['after_image'] = after_url
+        if not before_url:
+            return Response({'error': 'before_image is required.'}, status=400)
 
-        serializer = PreviousWorkWriteSerializer(data=data, context={'form': form})
+        serializer = PreviousWorkWriteSerializer(
+            data={'before_image': before_url},
+            context={'form': form}
+        )
         serializer.is_valid(raise_exception=True)
         work = serializer.save()
         return Response(PreviousWorkSerializer(work).data, status=201)
