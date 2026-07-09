@@ -300,11 +300,11 @@ class ProviderAddress(models.Model):
         related_name='provider_addresses'
     )
     lat = models.DecimalField(
-        max_digits=30, decimal_places=6,
+        max_digits=30, decimal_places=15,
         null=True, blank=True
     )
     lng = models.DecimalField(
-        max_digits=30, decimal_places=6,
+        max_digits=30, decimal_places=15,
         null=True, blank=True
     )
     district = models.CharField(max_length=100)        # ← أضفناه
