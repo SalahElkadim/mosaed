@@ -23,7 +23,7 @@ from .serializers import (
     ServiceOfferAdminSerializer,
     RequestChatSerializer,
     RequestChatCreateSerializer,
-    PlatformSettingsSerializer,NotificationSerializer,DeviceTokenRegisterSerializer,ProviderMyOfferSerializer
+    PlatformSettingsSerializer,NotificationSerializer,DeviceTokenRegisterSerializer,ProviderMyOfferSerializer,ServiceOfferUpdateSerializer
 )
 from existedservices.serializers import (
     ServiceCompletionFormSerializer,
@@ -31,7 +31,7 @@ from existedservices.serializers import (
     CompletionMediaWriteSerializer,
     CompletionMediaSerializer,
     BookingStatusUpdateSerializer,  # Added import
-    BookingAdminSerializer ,ServiceOfferUpdateSerializer
+    BookingAdminSerializer 
 )
 
 from asgiref.sync import async_to_sync
