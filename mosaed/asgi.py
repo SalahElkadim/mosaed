@@ -17,9 +17,7 @@ from custom_services.routing import websocket_urlpatterns
 application = ProtocolTypeRouter({
     'http': django_asgi_app,
 
-    'websocket': AllowedHostsOriginValidator(
-        JWTAuthMiddlewareStack(
-            URLRouter(websocket_urlpatterns)
-        )
+    'websocket': JWTAuthMiddlewareStack(
+        URLRouter(websocket_urlpatterns)
     ),
 })
