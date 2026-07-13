@@ -1338,3 +1338,38 @@ class ProviderOfferWithdrawView(APIView):
             {'message': 'تم سحب العرض بنجاح.'},
             status=status.HTTP_200_OK
         )
+    
+class CustomerConfirmProviderArrivalCustomRequestView(APIView):
+    """
+    POST /custom-requests/<request_id>/provider-arrived/
+    العميل يأكد إن الفني وصل → status النموذج يتحول لـ provider_arrived
+    و started_at بياخد وقت وتاريخ اللحظة دي.
+    """
+    permission_classes = [IsCustomer]
+
+    def post(self, request, request_id):
+        try:
+            form = ServiceCompletionForm.objects.get(
+                custom_request__id=request_id,
+                custom_request__customer=request.user
+            )
+        except ServiceCompletionForm.DoesNotExist:
+            return Response(
+                {'error': 'نموذج الإتمام غير موجود.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        if form.status == 'provider_arrived':
+            return Response(
+                {'error': 'تم تأكيد وصول الفني بالفعل.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        form.status     = 'provider_arrived'
+        form.started_at = timezone.now()
+        form.save(update_fields=['status', 'started_at'])
+
+        return Response(
+            ServiceCompletionFormSerializer(form).data,
+            status=status.HTTP_200_OK
+        )
