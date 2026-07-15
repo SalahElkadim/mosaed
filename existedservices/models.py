@@ -391,7 +391,9 @@ class PreviousWork(models.Model):
     id      = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     service = models.ForeignKey(
         ExistedService,
-        on_delete=models.CASCADE,
+        null=True,
+    blank=True,
+    on_delete=models.SET_NULL,
         related_name='previous_works'
     )
     completion_form = models.OneToOneField(

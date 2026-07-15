@@ -473,6 +473,12 @@ class ServiceCompletionFormSerializer(serializers.ModelSerializer):
             'media', 'previous_work', 'created_at', 'updated_at'
         ]
         read_only_fields = fields
+    def get_previous_work(self, obj):
+        try:
+            work = obj.previous_work
+        except PreviousWork.DoesNotExist:
+            return None
+        return PreviousWorkSerializer(work).data
 
 class ServiceCompletionFormUpdateSerializer(serializers.ModelSerializer):
     """الفني يضيف ملاحظات ويعمل finish"""
@@ -643,8 +649,9 @@ class PreviousWorkWriteSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         form = self.context['form']
+        service = form.booking.service if form.booking else None
         return PreviousWork.objects.create(
-            service=form.booking.service,
+            service=service,
             completion_form=form,
             **validated_data
         )

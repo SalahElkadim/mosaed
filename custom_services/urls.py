@@ -14,7 +14,7 @@ from .views import (
     ProviderOfferWithdrawView,
     ProviderChatView,
     ProviderCustomCompletionFormView,
-    ProviderCustomCompletionMediaView,
+    ProviderCustomCompletionMediaView,ProviderCustomPreviousWorkView,
     # Admin
     AdminCustomRequestListView,
     AdminCustomRequestDetailView,ProviderBookingListView,
@@ -135,5 +135,7 @@ urlpatterns = [
      path('device-tokens/', DeviceTokenView.as_view(), name='device-token'),
      path('custom-requests/<uuid:request_id>/provider-arrived/',CustomerConfirmProviderArrivalCustomRequestView.as_view(),name='custom-request-provider-arrived'
 ),
-
+     path('provider/custom-requests/<uuid:request_id>/previous-work/',
+     ProviderCustomPreviousWorkView.as_view(),
+     name='provider-custom-previous-work'),
 ]

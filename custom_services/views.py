@@ -9,7 +9,8 @@ from .models import (
     CustomRequest, ServiceOffer, RequestChat,Notification,
     PlatformSettings,DeviceToken
 )
-from existedservices.models import ServiceCompletionForm, CompletionMedia , Booking
+from existedservices.views import _resolve_image_field  # أو تنقلها لملف utils مشترك
+from existedservices.models import ServiceCompletionForm, CompletionMedia , Booking,PreviousWork
 from .serializers import (
     CustomRequestCreateSerializer,
     CustomRequestUpdateSerializer,
@@ -31,7 +32,7 @@ from existedservices.serializers import (
     CompletionMediaWriteSerializer,
     CompletionMediaSerializer,
     BookingStatusUpdateSerializer,  # Added import
-    BookingAdminSerializer 
+    BookingAdminSerializer ,PreviousWorkSerializer, PreviousWorkWriteSerializer
 )
 
 from asgiref.sync import async_to_sync
@@ -1373,3 +1374,91 @@ class CustomerConfirmProviderArrivalCustomRequestView(APIView):
             ServiceCompletionFormSerializer(form).data,
             status=status.HTTP_200_OK
         )
+    
+
+class ProviderCustomPreviousWorkView(APIView):
+    permission_classes = [IsProviderOrAdmin]
+
+    def get_form_or_work(self, request, request_id, need='form'):
+        user_type = getattr(request.auth, 'payload', {}).get('user_type')
+        try:
+            if user_type == 'admin':
+                form = ServiceCompletionForm.objects.get(custom_request__id=request_id)
+            else:
+                form = ServiceCompletionForm.objects.get(
+                    custom_request__id=request_id,
+                    custom_request__accepted_provider=request.user
+                )
+            if need == 'work':
+                return form.previous_work
+            return form
+        except (ServiceCompletionForm.DoesNotExist, PreviousWork.DoesNotExist):
+            return None
+
+    def get(self, request, request_id):
+        work = self.get_form_or_work(request, request_id, need='work')
+        if not work:
+            return Response({'error': 'Previous work not found.'}, status=404)
+        return Response(PreviousWorkSerializer(work).data)
+
+    def post(self, request, request_id):
+        form = self.get_form_or_work(request, request_id, need='form')
+        if not form:
+            return Response({'error': 'Completion form not found.'}, status=404)
+
+        if form.status != 'provider_arrived':
+            return Response(
+                {'error': 'لا يمكن رفع before_image قبل تأكيد العميل وصول الفني.'},
+                status=400
+            )
+
+        if 'after_image' in request.data or 'after_image' in request.FILES:
+            return Response(
+                {'error': 'لا يمكن رفع after_image عند بدء الشغل. استخدم PATCH بعد إنهاء الشغل.'},
+                status=400
+            )
+
+        try:
+            before_url = _resolve_image_field(request, 'before_image', folder="previous_works")
+        except ValueError as e:
+            return Response({'error': str(e)}, status=400)
+
+        if not before_url:
+            return Response({'error': 'before_image is required.'}, status=400)
+
+        serializer = PreviousWorkWriteSerializer(
+            data={'before_image': before_url},
+            context={'form': form}
+        )
+        serializer.is_valid(raise_exception=True)
+        work = serializer.save()
+        return Response(PreviousWorkSerializer(work).data, status=201)
+
+    def patch(self, request, request_id):
+        work = self.get_form_or_work(request, request_id, need='work')
+        if not work:
+            return Response({'error': 'Previous work not found.'}, status=404)
+
+        try:
+            before_url = _resolve_image_field(request, 'before_image', folder="previous_works")
+            after_url  = _resolve_image_field(request, 'after_image', folder="previous_works")
+        except ValueError as e:
+            return Response({'error': str(e)}, status=400)
+
+        data = {}
+        if before_url:
+            data['before_image'] = before_url
+        if after_url:
+            data['after_image'] = after_url
+
+        for field, value in data.items():
+            setattr(work, field, value)
+        work.save()
+        return Response(PreviousWorkSerializer(work).data)
+
+    def delete(self, request, request_id):
+        work = self.get_form_or_work(request, request_id, need='work')
+        if not work:
+            return Response({'error': 'Previous work not found.'}, status=404)
+        work.delete()
+        return Response({'message': 'Previous work deleted successfully.'})
