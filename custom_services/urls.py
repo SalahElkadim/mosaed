@@ -11,7 +11,7 @@ from .views import (
     ProviderCustomRequestListView,
     ProviderCustomRequestDetailView,
     ProviderOfferCreateView,
-    ProviderOfferWithdrawView,
+    ProviderOfferWithdrawView,ProviderCustomCompletionFormListView,
     ProviderChatView,
     ProviderCustomCompletionFormView,
     ProviderCustomCompletionMediaView,ProviderCustomPreviousWorkView,
@@ -81,7 +81,10 @@ urlpatterns = [
     path('provider/custom-requests/<uuid:request_id>/chat/',
          ProviderChatView.as_view(),
          name='provider-chat'),
-
+         
+     path('provider/custom-requests/completion-forms/',
+     ProviderCustomCompletionFormListView.as_view(),
+     name='provider-custom-completion-forms-list'),
     path('provider/custom-requests/<uuid:request_id>/completion/',
          ProviderCustomCompletionFormView.as_view(),
          name='provider-completion-form'),
@@ -138,4 +141,6 @@ urlpatterns = [
      path('provider/custom-requests/<uuid:request_id>/previous-work/',
      ProviderCustomPreviousWorkView.as_view(),
      name='provider-custom-previous-work'),
+
+     
 ]

@@ -471,3 +471,53 @@ class ServiceOfferUpdateSerializer(serializers.Serializer):
             setattr(instance, attr, value)
         instance.save(update_fields=list(validated_data.keys()) + ['updated_at'])
         return instance
+    
+
+
+class ProviderCustomCompletionFormListSerializer(serializers.Serializer):
+    id                  = serializers.UUIDField()
+    request_id          = serializers.SerializerMethodField()
+    request_title       = serializers.SerializerMethodField()
+    specialization_name = serializers.SerializerMethodField()
+    customer_address    = serializers.SerializerMethodField()
+    final_price         = serializers.SerializerMethodField()
+    status              = serializers.CharField()
+    is_finished         = serializers.BooleanField()
+    started_at          = serializers.DateTimeField()
+    finished_at         = serializers.DateTimeField()
+    created_at          = serializers.DateTimeField()
+
+    def get_request_id(self, obj):
+        return str(obj.custom_request_id) if obj.custom_request_id else None
+
+    def get_request_title(self, obj):
+        return obj.custom_request.title if obj.custom_request else None
+
+    def get_specialization_name(self, obj):
+        if obj.custom_request and obj.custom_request.specialization:
+            return obj.custom_request.specialization.name
+        return None
+
+    def get_customer_address(self, obj):
+        address = obj.custom_request.address if obj.custom_request else None
+        if not address:
+            return None
+        return {
+            'id': str(address.id),
+            'city': address.city,
+            'region': address.region,
+            'district': address.district,
+            'street': address.street,
+            'building_no': address.building_no,
+            'floor_no': address.floor_no,
+            'apartment_no': address.apartment_no,
+            'label': address.label,
+            'lat': str(address.lat) if address.lat is not None else None,
+            'lng': str(address.lng) if address.lng is not None else None,
+        }
+
+    def get_final_price(self, obj):
+        if not obj.custom_request:
+            return None
+        accepted_offer = obj.custom_request.offers.filter(status='accepted').first()
+        return str(accepted_offer.final_price) if accepted_offer else None

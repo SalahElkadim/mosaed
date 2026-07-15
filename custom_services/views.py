@@ -23,7 +23,7 @@ from .serializers import (
     ServiceOfferCreateSerializer,
     ServiceOfferAdminSerializer,
     RequestChatSerializer,
-    RequestChatCreateSerializer,
+    RequestChatCreateSerializer,ProviderCustomCompletionFormListSerializer,
     PlatformSettingsSerializer,NotificationSerializer,DeviceTokenRegisterSerializer,ProviderMyOfferSerializer,ServiceOfferUpdateSerializer
 )
 from existedservices.serializers import (
@@ -1462,3 +1462,33 @@ class ProviderCustomPreviousWorkView(APIView):
             return Response({'error': 'Previous work not found.'}, status=404)
         work.delete()
         return Response({'message': 'Previous work deleted successfully.'})
+    
+
+class ProviderCustomCompletionFormListView(APIView):
+    """
+    GET /provider/custom-requests/completion-forms/?is_finished=true
+    الفني يشوف كل نماذج الإتمام الخاصة بطلباته المخصصة (Custom Requests)
+    """
+    permission_classes = [IsProvider]
+
+    def get(self, request):
+        is_finished_param = request.query_params.get('is_finished')
+
+        forms = ServiceCompletionForm.objects.filter(
+            custom_request__isnull=False,
+            custom_request__accepted_provider=request.user,
+        ).select_related(
+            'custom_request',
+            'custom_request__specialization',
+            'custom_request__address',
+        ).order_by('-created_at')
+
+        if is_finished_param == 'true':
+            forms = forms.filter(is_finished=True)
+        elif is_finished_param == 'false':
+            forms = forms.filter(is_finished=False)
+
+        return Response(
+            ProviderCustomCompletionFormListSerializer(forms, many=True).data,
+            status=status.HTTP_200_OK
+        )
