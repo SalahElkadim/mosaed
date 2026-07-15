@@ -263,7 +263,8 @@ class ServiceCompletionForm(models.Model):
     id      = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     booking = models.OneToOneField(
         Booking,
-        on_delete=models.CASCADE,
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
         related_name='completion_form'
     )
     custom_request = models.OneToOneField(
