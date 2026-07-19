@@ -81,7 +81,7 @@ urlpatterns = [
     path('provider/custom-requests/<uuid:request_id>/chat/',
          ProviderChatView.as_view(),
          name='provider-chat'),
-         
+
      path('provider/custom-requests/completion-forms/',
      ProviderCustomCompletionFormListView.as_view(),
      name='provider-custom-completion-forms-list'),
@@ -144,3 +144,5 @@ urlpatterns = [
 
      
 ]
+
+
