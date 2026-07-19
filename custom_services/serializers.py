@@ -504,8 +504,8 @@ class ProviderCustomCompletionFormListSerializer(serializers.Serializer):
             return None
         return {
             'id': str(address.id),
-            'city': address.city,
-            'region': address.region,
+            'city': address.city.name if address.city else None,
+            'region': address.region.name if address.region else None,
             'district': address.district,
             'street': address.street,
             'building_no': address.building_no,
