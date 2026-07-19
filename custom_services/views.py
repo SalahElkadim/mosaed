@@ -1492,3 +1492,23 @@ class ProviderCustomCompletionFormListView(APIView):
             ProviderCustomCompletionFormListSerializer(forms, many=True).data,
             status=status.HTTP_200_OK
         )
+    
+class CustomerCustomCompletionFormView(APIView):
+    """
+    GET /custom-requests/<request_id>/completion/
+    العميل يشوف تفاصيل نموذج الإتمام بتاع طلبه المخصص (بدون تعديل)
+    """
+    permission_classes = [IsCustomer]
+
+    def get(self, request, request_id):
+        try:
+            form = ServiceCompletionForm.objects.get(
+                custom_request__id=request_id,
+                custom_request__customer=request.user
+            )
+        except ServiceCompletionForm.DoesNotExist:
+            return Response(
+                {'error': 'نموذج الإتمام غير موجود.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        return Response(ServiceCompletionFormSerializer(form).data)

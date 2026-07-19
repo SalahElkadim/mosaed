@@ -20,7 +20,7 @@ from .views import (
     ServiceRatingSummaryView,
     AdminReviewDeleteView,
     AdminServiceReviewsClearView,AdminServiceWarrantyView,AdminBookingAssignProviderView,
-    ProviderCompletionFormView,
+    ProviderCompletionFormView,CustomerCompletionFormView,
     ProviderCompletionMediaView,
     CouponValidateView,CustomerConfirmProviderArrivalView,
     AdminCouponListView,AdminCouponDetailView,AdminAvailableProvidersForServiceView,ProviderCompletionFormListView
@@ -93,6 +93,10 @@ urlpatterns = [
      path('bookings/<uuid:booking_id>/provider-arrived/', CustomerConfirmProviderArrivalView.as_view()),
 
 
+# existedservices/urls.py
 
+path('bookings/<uuid:booking_id>/completion/',
+     CustomerCompletionFormView.as_view(),
+     name='customer-completion-form'),
     
 ]

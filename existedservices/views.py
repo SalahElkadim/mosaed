@@ -1174,3 +1174,24 @@ class CustomerConfirmProviderArrivalView(APIView):
             ServiceCompletionFormSerializer(form).data,
             status=status.HTTP_200_OK
         )
+    
+
+class CustomerCompletionFormView(APIView):
+    """
+    GET /bookings/<booking_id>/completion/
+    العميل يشوف تفاصيل نموذج الإتمام بتاع حجزه (بدون تعديل)
+    """
+    permission_classes = [IsCustomer]
+
+    def get(self, request, booking_id):
+        try:
+            form = ServiceCompletionForm.objects.get(
+                booking__id=booking_id,
+                booking__customer=request.user
+            )
+        except ServiceCompletionForm.DoesNotExist:
+            return Response(
+                {'error': 'Completion form not found.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        return Response(ServiceCompletionFormSerializer(form).data)

@@ -12,7 +12,7 @@ from .views import (
     ProviderCustomRequestDetailView,
     ProviderOfferCreateView,
     ProviderOfferWithdrawView,ProviderCustomCompletionFormListView,
-    ProviderChatView,
+    ProviderChatView,CustomerCustomCompletionFormView,
     ProviderCustomCompletionFormView,
     ProviderCustomCompletionMediaView,ProviderCustomPreviousWorkView,
     # Admin
@@ -141,6 +141,11 @@ urlpatterns = [
      path('provider/custom-requests/<uuid:request_id>/previous-work/',
      ProviderCustomPreviousWorkView.as_view(),
      name='provider-custom-previous-work'),
+     # custom_services/urls.py
+
+path('custom-requests/<uuid:request_id>/completion/',
+     CustomerCustomCompletionFormView.as_view(),
+     name='customer-custom-completion-form'),
 
      
 ]
