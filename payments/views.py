@@ -25,7 +25,7 @@ from .serializers import (
     PayoutBatchAdminSerializer,
     DueCollectionBatchAdminSerializer,
 )
-from .utils.moyasar import create_payment, get_payment, verify_webhook_payload
+from .utils.moyasar import create_payment_link, get_payment, verify_webhook_payload
 from .utils.notifications import (
     notify_provider_payment_received,
     notify_provider_account_unblocked,
@@ -138,7 +138,7 @@ class InitiateOnlinePaymentView(APIView):
         callback_url = f"{settings.FRONTEND_URL}/payments/{pr.id}/callback"
 
         try:
-            payment_data = create_payment(
+            payment_data = create_payment_link(
                 amount_halalas=int(pr.amount * 100),
                 description=f"دفع طلب خدمة #{pr.custom_request_id}",
                 callback_url=callback_url,
