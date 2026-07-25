@@ -8,7 +8,7 @@ from .views import (
     ProviderWalletView,
     AdminPayoutBatchListView,
     AdminPayoutBatchItemConfirmView,
-    AdminDueCollectionBatchListView,DueCollectionItemDetailView,DueCollectionCallbackView
+    AdminDueCollectionBatchListView,DueCollectionItemDetailView,DueCollectionCallbackView,AdminDashboardOverviewView
 )
 
 urlpatterns = [
@@ -30,4 +30,6 @@ urlpatterns = [
     path('admin/payments/due-collection-batches/', AdminDueCollectionBatchListView.as_view()),
     path('payments/due-collection/<uuid:item_id>/', DueCollectionItemDetailView.as_view(), name='due-collection-detail'),
 path('payments/due-collection/<uuid:item_id>/callback/', DueCollectionCallbackView.as_view(), name='due-collection-callback'),
+    path('admin/payments/dashboard-overview/', AdminDashboardOverviewView.as_view()),
+
 ]

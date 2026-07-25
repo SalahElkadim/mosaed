@@ -237,8 +237,15 @@ class PaymentRequestCallbackView(APIView):
 
 @transaction.atomic
 def _finalize_online_payment(pr):
+    # select_for_update بيقفل الصف ده في الـ DB لحد ما الـ transaction تخلص.
+    # لو طلبين (callback + webhook) وصلوا في نفس اللحظة، التاني هيستنى
+    # لحد ما الأول يخلص commit، وبعدين هيقرا status='paid' المحدّث
+    # ويرجع فورًا من غير ما ينفذ credit() تاني.
+    pr = PaymentRequest.objects.select_for_update().get(pk=pr.pk)
+
     if pr.status == 'paid':
         return
+
     pr.mark_paid()
     wallet, _ = ProviderWallet.objects.get_or_create(provider=pr.provider)
     wallet.credit(pr.provider_share, payment_request=pr)
@@ -305,15 +312,10 @@ class MoyasarWebhookView(APIView):
             attempt.status = 'paid'
             attempt.save(update_fields=['status', 'raw_callback_data', 'updated_at'])
 
-            # حماية من التكرار — لو الـ webhook اتبعت أكتر من مرة لنفس الدفع
-            if pr.status != 'paid':
-                pr.mark_paid()
-
-                wallet, _ = ProviderWallet.objects.get_or_create(provider=pr.provider)
-                wallet.credit(pr.provider_share, payment_request=pr)
-
-                # TODO: إشعار الفني بنجاح الدفع (نفس نمط _create_and_send
-                # في custom_services/signals.py — event جديد مثلاً 'payment_received')
+            # بدل تكرار منطق mark_paid + wallet.credit هنا، بننادي نفس
+            # الدالة المستخدمة في الـ callback — مصدر واحد للمنطق، وبالتبعية
+            # نفس حماية select_for_update ضد التكرار
+            _finalize_online_payment(pr)
         else:
             attempt.status = 'failed'
             attempt.save(update_fields=['status', 'raw_callback_data', 'updated_at'])
@@ -525,7 +527,8 @@ class DueCollectionCallbackView(APIView):
 
 @transaction.atomic
 def _finalize_due_payment(item):
-    item.refresh_from_db()
+    item = DueCollectionItem.objects.select_for_update().select_related('provider').get(pk=item.pk)
+
     if item.status == 'paid':
         return
 
@@ -542,3 +545,78 @@ def _finalize_due_payment(item):
         batch.save(update_fields=['status'])
 
     transaction.on_commit(lambda: notify_provider_account_unblocked(item.provider_id))
+
+from django.db.models import Sum
+from django.utils import timezone
+from datetime import timedelta
+
+from .serializers import AdminDashboardOverviewSerializer
+
+
+class AdminDashboardOverviewView(APIView):
+    """
+    GET /admin/payments/dashboard-overview/
+    نظرة شاملة سريعة للأدمن: كام فني مقفول، إجمالي المستحقات المعلقة،
+    رصيد المحافظ الإجمالي، وأي batch من أسبوع فات لسه مش completed.
+    """
+    permission_classes = [IsAdminUser]
+
+    # لو الـ batch أقدم من كذا يوم ولسه مش completed، يعتبر "متأخر"
+    STALE_THRESHOLD_DAYS = 7
+
+    def get(self, request):
+        blocked_dues = ProviderDue.objects.filter(
+            is_blocked=True
+        ).select_related('provider').order_by('-blocked_at')
+
+        # إجمالي المستحقات المعلقة — على كل الفنيين (مقفولين أو لسه)
+        total_outstanding = ProviderDue.objects.filter(
+            outstanding_amount__gt=0
+        ).aggregate(total=Sum('outstanding_amount'))['total'] or 0
+
+        total_wallet_balance = ProviderWallet.objects.aggregate(
+            total=Sum('available_balance')
+        )['total'] or 0
+
+        stale_cutoff = timezone.now().date() - timedelta(days=self.STALE_THRESHOLD_DAYS)
+
+        stale_payout_batches = PayoutBatch.objects.filter(
+            week_end__lt=stale_cutoff
+        ).exclude(status='completed')
+
+        stale_due_batches = DueCollectionBatch.objects.filter(
+            week_end__lt=stale_cutoff
+        ).exclude(status='completed')
+
+        stale_batches = [
+            {
+                'batch_type': 'payout',
+                'id': b.id,
+                'week_start': b.week_start,
+                'week_end': b.week_end,
+                'status': b.status,
+            }
+            for b in stale_payout_batches
+        ] + [
+            {
+                'batch_type': 'due_collection',
+                'id': b.id,
+                'week_start': b.week_start,
+                'week_end': b.week_end,
+                'status': b.status,
+            }
+            for b in stale_due_batches
+        ]
+
+        data = {
+            'blocked_providers_count': blocked_dues.count(),
+            'total_outstanding_amount': total_outstanding,
+            'total_wallet_balance': total_wallet_balance,
+            'blocked_providers': blocked_dues,
+            'stale_batches': stale_batches,
+        }
+
+        return Response(
+            AdminDashboardOverviewSerializer(data).data,
+            status=status.HTTP_200_OK
+        )

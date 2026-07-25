@@ -138,3 +138,34 @@ class DueCollectionItemPublicSerializer(serializers.ModelSerializer):
         model  = DueCollectionItem
         fields = ['id', 'amount_due', 'status', 'created_at', 'paid_at']
         read_only_fields = fields
+
+
+class BlockedProviderSerializer(serializers.Serializer):
+    """فني مقفول — للعرض في الداشبورد"""
+    provider_id       = serializers.UUIDField(source='provider.id')
+    provider_name     = serializers.CharField(source='provider.name')
+    provider_phone    = serializers.CharField(source='provider.phone_number')
+    outstanding_amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+    blocked_at         = serializers.DateTimeField()
+
+
+class StaleBatchSerializer(serializers.Serializer):
+    """batch من أسبوع فات لسه مش completed — تنبيه للأدمن"""
+    batch_type = serializers.CharField()   # 'payout' أو 'due_collection'
+    id         = serializers.UUIDField()
+    week_start = serializers.DateField()
+    week_end   = serializers.DateField()
+    status     = serializers.CharField()
+    days_overdue = serializers.SerializerMethodField()
+
+    def get_days_overdue(self, obj):
+        from django.utils import timezone
+        return (timezone.now().date() - obj['week_end']).days
+
+
+class AdminDashboardOverviewSerializer(serializers.Serializer):
+    blocked_providers_count = serializers.IntegerField()
+    total_outstanding_amount = serializers.DecimalField(max_digits=14, decimal_places=2)
+    total_wallet_balance    = serializers.DecimalField(max_digits=14, decimal_places=2)
+    blocked_providers       = BlockedProviderSerializer(many=True)
+    stale_batches           = StaleBatchSerializer(many=True)
