@@ -37,6 +37,7 @@ INSTALLED_APPS = [
     'existedservices.apps.ServicesConfig',
     'custom_services',
     'django_celery_beat',
+    'payments', 
 
 ]
 
@@ -184,12 +185,17 @@ CELERY_TIMEZONE = 'Africa/Cairo'
 CELERY_BEAT_SCHEDULE = {
     'expire-custom-requests': {
         'task': 'expire_custom_requests',
-        'schedule': crontab(minute='*/15'),  
+        'schedule': crontab(minute='*/15'),
     },
 
     'cleanup-old-notifications-daily': {
         'task': 'cleanup_old_notifications',
         'schedule': crontab(hour=3, minute=30),
+    },
+
+    'generate-weekly-batches': {
+        'task': 'generate_weekly_batches',
+        'schedule': crontab(day_of_week='friday', hour=3, minute=0),
     },
 }
 CHANNEL_LAYERS = {

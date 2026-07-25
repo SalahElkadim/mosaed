@@ -247,6 +247,9 @@ class Notification(models.Model):
         ('new_offer', 'New Offer'),
         ('offer_accepted', 'Offer Accepted'),
         ('new_chat_message', 'New Chat Message'),
+        ('payment_received', 'Payment Received'),           # ← جديد
+        ('due_payment_required', 'Due Payment Required'),    # ← جديد
+        ('account_unblocked', 'Account Unblocked'),
     ]
  
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

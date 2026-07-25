@@ -1,4 +1,5 @@
 from django.utils import timezone
+from django.core.exceptions import ValidationError
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -34,7 +35,7 @@ from existedservices.serializers import (
     BookingStatusUpdateSerializer,  # Added import
     BookingAdminSerializer ,PreviousWorkSerializer, PreviousWorkWriteSerializer
 )
-
+from payments.permissions import IsProviderNotBlocked
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from .consumers import chat_group
@@ -153,23 +154,49 @@ class CustomerCustomRequestListView(APIView):
 
     def get(self, request):
         status_filter = request.query_params.get('status')
+        date_from     = request.query_params.get('date_from')  # YYYY-MM-DD
+        date_to       = request.query_params.get('date_to')    # YYYY-MM-DD
+
         requests = CustomRequest.objects.filter(
             customer=request.user
         ).select_related('specialization', 'address')
 
         if status_filter:
             requests = requests.filter(status=status_filter)
+
+        if date_from:
+            try:
+                requests = requests.filter(scheduled_date__gte=date_from)
+            except (ValueError, ValidationError):
+                return Response(
+                    {'error': 'صيغة date_from غير صحيحة. استخدم YYYY-MM-DD.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+        if date_to:
+            try:
+                requests = requests.filter(scheduled_date__lte=date_to)
+            except (ValueError, ValidationError):
+                return Response(
+                    {'error': 'صيغة date_to غير صحيحة. استخدم YYYY-MM-DD.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
         # Lazy expiry على القائمة
         for req in requests:
             _check_and_expire(req)
 
-        # إعادة الجلب بعد التحديث المحتمل
+        # إعادة الجلب بعد التحديث المحتمل (بنفس الفلاتر)
         requests = CustomRequest.objects.filter(
             customer=request.user
         ).select_related('specialization', 'address')
+
         if status_filter:
             requests = requests.filter(status=status_filter)
+        if date_from:
+            requests = requests.filter(scheduled_date__gte=date_from)
+        if date_to:
+            requests = requests.filter(scheduled_date__lte=date_to)
 
         return Response(
             CustomRequestListSerializer(requests, many=True).data,
@@ -486,7 +513,7 @@ class ProviderCustomRequestListView(APIView):
     من عنوانه الافتراضي)، بدل الاعتماد على city/region اللي مش موجودين
     في موديل Provider أصلاً.
     """
-    permission_classes = [IsProvider]
+    permission_classes = [IsProvider, IsProviderNotBlocked]
 
     def get(self, request):
         provider = request.user
@@ -536,7 +563,7 @@ class ProviderCustomRequestDetailView(APIView):
     """
     GET /provider/custom-requests/<id>/
     """
-    permission_classes = [IsProvider]
+    permission_classes = [IsProvider, IsProviderNotBlocked]
 
     def get(self, request, request_id):
         provider = request.user
@@ -588,7 +615,7 @@ class ProviderOfferCreateView(APIView):
     """
     POST /provider/custom-requests/<id>/offers/   ← الفني يبعت عرض
     """
-    permission_classes = [IsProvider]
+    permission_classes = [IsProvider, IsProviderNotBlocked]
 
     def post(self, request, request_id):
         try:
@@ -619,7 +646,7 @@ class ProviderOfferWithdrawView(APIView):
     """
     DELETE /provider/offers/<offer_id>/   ← الفني يسحب عرضه
     """
-    permission_classes = [IsProvider]
+    permission_classes = [IsProvider, IsProviderNotBlocked]
 
     def delete(self, request, offer_id):
         try:
@@ -657,7 +684,7 @@ class ProviderChatView(APIView):
     GET  /provider/custom-requests/<id>/chat/?limit=30&offset=0
     POST /provider/custom-requests/<id>/chat/
     """
-    permission_classes = [IsProvider]
+    permission_classes = [IsProvider, IsProviderNotBlocked]
  
     DEFAULT_LIMIT = 30
     MAX_LIMIT = 100
@@ -736,7 +763,7 @@ class ProviderChatMarkReadView(APIView):
     """
     POST /provider/custom-requests/<id>/chat/read/
     """
-    permission_classes = [IsProvider]
+    permission_classes = [IsProvider, IsProviderNotBlocked]
  
     def post(self, request, request_id):
         try:
@@ -1247,7 +1274,8 @@ class ProviderMyOffersListView(APIView):
     GET /provider/offers/?status=pending
     الفني يشوف كل العروض اللي بعتها هو، بحالتها (accepted/rejected/pending/withdrawn)
     """
-    permission_classes = [IsProvider]
+    permission_classes = [IsProvider, IsProviderNotBlocked]
+
 
     def get(self, request):
         status_filter = request.query_params.get('status')
