@@ -169,3 +169,15 @@ class AdminDashboardOverviewSerializer(serializers.Serializer):
     total_wallet_balance    = serializers.DecimalField(max_digits=14, decimal_places=2)
     blocked_providers       = BlockedProviderSerializer(many=True)
     stale_batches           = StaleBatchSerializer(many=True)
+
+class InitiateOnlinePaymentSerializer(serializers.Serializer):
+    """
+    الفرونت بيبعت الـ token اللي Moyasar.js ولّده في المتصفح بعد ما
+    العميل يدخل بيانات الكارت.
+    """
+    token = serializers.CharField()
+
+    def validate_token(self, value):
+        if not value.strip():
+            raise serializers.ValidationError("التوكن مطلوب.")
+        return value.strip()
