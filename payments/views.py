@@ -23,7 +23,7 @@ from .serializers import (
     ProviderWalletSerializer,
     WalletTransactionSerializer,
     PayoutBatchAdminSerializer,
-    DueCollectionBatchAdminSerializer,
+    DueCollectionBatchAdminSerializer,DueTransactionSerializer,
 )
 from .utils.moyasar import create_payment_link, get_payment, verify_webhook_payload
 from .utils.notifications import (
@@ -60,16 +60,10 @@ class PaymentRequestDetailView(APIView):
 
 
 # ==================== اختيار طريقة الدفع ====================
-
 class PaymentMethodSelectView(APIView):
     """
     POST /payments/<payment_request_id>/select-method/
     body: {"payment_method": "online" | "cash"}
-
-    العميل هو اللي بيختار. لو "online" بنحدث الحالة بس ونستنى الفرونت
-    يعرض فورم Moyasar.js (زي StepPaymentPage.jsx بالظبط) ويبعتلنا token
-    عبر InitiateOnlinePaymentView بعد ما العميل يدخل بيانات الكارت.
-    لو "cash" بنحدث الحالة ومستنيين تأكيد الفني.
     """
     permission_classes = [IsCustomer]
 
@@ -90,13 +84,19 @@ class PaymentMethodSelectView(APIView):
         serializer.is_valid(raise_exception=True)
         method = serializer.validated_data['payment_method']
 
+        # النقاط شغالة على الأونلاين بس — لو العميل مستخدم نقاط
+        # ومحاول يختار كاش، لازم يلغي النقاط الأول
+        if method == 'cash' and pr.points_used > 0:
+            return Response(
+                {'error': 'لا يمكن الدفع كاش عند استخدام نقاط الولاء. يرجى إلغاء النقاط أولاً أو الدفع أونلاين.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         pr.payment_method = method
         pr.status = 'awaiting_cash_confirmation' if method == 'cash' else 'awaiting_gateway_payment'
         pr.save(update_fields=['payment_method', 'status'])
 
         return Response(PaymentRequestSerializer(pr).data, status=status.HTTP_200_OK)
-
-
 # ==================== تنفيذ الدفع الأونلاين بالـ token ====================
 
 class InitiateOnlinePaymentView(APIView):
@@ -235,12 +235,12 @@ class PaymentRequestCallbackView(APIView):
         return self._handle(request, payment_request_id)
 
 
+from .signals import schedule_points_for_payment  # يضاف مع الـ imports فوق
+from .models import PointsMarketingExpense          # يضاف مع الـ imports فوق
+
+
 @transaction.atomic
 def _finalize_online_payment(pr):
-    # select_for_update بيقفل الصف ده في الـ DB لحد ما الـ transaction تخلص.
-    # لو طلبين (callback + webhook) وصلوا في نفس اللحظة، التاني هيستنى
-    # لحد ما الأول يخلص commit، وبعدين هيقرا status='paid' المحدّث
-    # ويرجع فورًا من غير ما ينفذ credit() تاني.
     pr = PaymentRequest.objects.select_for_update().get(pk=pr.pk)
 
     if pr.status == 'paid':
@@ -248,9 +248,18 @@ def _finalize_online_payment(pr):
 
     pr.mark_paid()
     wallet, _ = ProviderWallet.objects.get_or_create(provider=pr.provider)
-    wallet.credit(pr.provider_share, payment_request=pr)
+    wallet.credit(pr.provider_share, payment_request=pr)  # نصيب الفني كامل، من غير أي تأثير بالخصم
+
+    # تسجيل الخصم (لو موجود) كمصروف تسويقي منفصل تمامًا — مفيش أي
+    # لمس لـ platform_share أو provider_share هنا خالص
+    if pr.points_discount_amount > 0:
+        PointsMarketingExpense.objects.create(
+            payment_request=pr,
+            amount=pr.points_discount_amount,
+        )
 
     transaction.on_commit(lambda: notify_provider_payment_received(pr.provider_id, pr))
+    schedule_points_for_payment(pr)
 
 # ==================== Webhook ميسر ====================
 
@@ -333,7 +342,6 @@ class MoyasarWebhookView(APIView):
 
 
 # ==================== تأكيد الفني لاستلام الكاش ====================
-
 class ConfirmCashPaymentView(APIView):
     """
     POST /payments/<payment_request_id>/confirm-cash/
@@ -361,11 +369,12 @@ class ConfirmCashPaymentView(APIView):
         pr.mark_paid()
 
         due, _ = ProviderDue.objects.get_or_create(provider=pr.provider)
+        # نصيب المنصة كامل من غير خصم — النقاط ممنوعة أصلاً مع الكاش
+        # (راجع التحقق في PaymentMethodSelectView تحت)، فالسطر ده
+        # طبقة حماية إضافية بس (defensive)
         due.charge(pr.platform_share, payment_request=pr)
 
         return Response(PaymentRequestSerializer(pr).data, status=status.HTTP_200_OK)
-
-
 # ==================== حالة مستحقات الفني (مستثناة من القفل) ====================
 
 class ProviderDuesStatusView(APIView):
@@ -618,5 +627,179 @@ class AdminDashboardOverviewView(APIView):
 
         return Response(
             AdminDashboardOverviewSerializer(data).data,
+            status=status.HTTP_200_OK
+        )
+    
+class PaymentRequestByCustomRequestView(APIView):
+    """
+    GET /payments/by-custom-request/<custom_request_id>/
+    بتترجع تفاصيل نموذج الدفع بناءً على الـ custom_request_id مباشرة —
+    مفيدة للفرونت لما يكون معاه بس رقم الطلب (مش عارف payment_request_id
+    لسه) عشان يعرف يوجّه العميل لشاشة الدفع بعد ما الفني يخلّص الشغل.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, custom_request_id):
+        try:
+            pr = PaymentRequest.objects.select_related(
+                'completion_form__custom_request'
+            ).get(completion_form__custom_request__id=custom_request_id)
+        except PaymentRequest.DoesNotExist:
+            return Response(
+                {'error': 'لا يوجد نموذج دفع لهذا الطلب بعد.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        user_type = getattr(request.auth, 'payload', {}).get('user_type')
+        if user_type == 'customer' and pr.customer_id != request.user.id:
+            return Response({'error': 'غير مصرح.'}, status=status.HTTP_403_FORBIDDEN)
+        if user_type == 'provider' and pr.provider_id != request.user.id:
+            return Response({'error': 'غير مصرح.'}, status=status.HTTP_403_FORBIDDEN)
+
+        return Response(PaymentRequestSerializer(pr).data, status=status.HTTP_200_OK)
+    
+
+class ProviderDueDetailView(APIView):
+    """
+    GET /provider/dues/
+    شاشة تفصيلية للفني يشوف فيها مستحقاته الحالية + آخر الحركات —
+    توازي ProviderWalletView تمامًا، بس للمستحقات مش المحفظة.
+    """
+    permission_classes = [IsProvider]
+
+    def get(self, request):
+        due, _ = ProviderDue.objects.get_or_create(provider=request.user)
+        transactions = due.transactions.all()[:50]
+        return Response(
+            {
+                'due': ProviderDuesStatusSerializer(due).data,
+                'recent_transactions': DueTransactionSerializer(transactions, many=True).data,
+            },
+            status=status.HTTP_200_OK
+        )
+
+from decimal import Decimal
+from .models import CustomerWallet, CustomerPointsTransaction  # يضاف مع الـ imports فوق
+from .serializers import CustomerWalletSerializer, CustomerPointsTransactionSerializer  # يضاف مع الـ imports فوق
+
+
+class ApplyPointsView(APIView):
+    """
+    POST /payments/<payment_request_id>/apply-points/
+    body: {"points": "30.00"}
+
+    لازم تتنادى قبل select-method. لو العميل عايز يغيّر الكمية، النداء
+    ده بيرجع النقاط القديمة (لو موجودة) ويطبّق القيمة الجديدة من غير
+    ما يحتاج ينادي remove-points الأول.
+    """
+    permission_classes = [IsCustomer]
+
+    def post(self, request, payment_request_id):
+        try:
+            pr = PaymentRequest.objects.select_related(
+                'completion_form__custom_request'
+            ).get(id=payment_request_id)
+        except PaymentRequest.DoesNotExist:
+            return Response({'error': 'نموذج الدفع غير موجود.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if pr.customer_id != request.user.id:
+            return Response({'error': 'غير مصرح.'}, status=status.HTTP_403_FORBIDDEN)
+
+        if pr.status != 'awaiting_method':
+            return Response(
+                {'error': 'لا يمكن استخدام النقاط بعد اختيار طريقة الدفع.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            requested_points = Decimal(str(request.data.get('points', '0')))
+        except Exception:
+            return Response({'error': 'قيمة النقاط غير صحيحة.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if requested_points <= 0:
+            return Response({'error': 'يجب أن تكون النقاط أكبر من صفر.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        wallet, _ = CustomerWallet.objects.get_or_create(customer=request.user)
+
+        # لو مستخدم نقاط بالفعل على الطلب ده، رجّعها الأول قبل التطبيق الجديد
+        if pr.points_used > 0:
+            wallet.refund(pr.points_used, payment_request=pr)
+            pr.points_used = 0
+            pr.points_discount_amount = 0
+
+        # الحد الأقصى = 50% من قيمة الطلب (مفيش علاقة بـ platform_share
+        # خالص دلوقتي، لأن الخصم بقى مصروف تسويقي منفصل)
+        max_discount = pr.amount * Decimal('0.5')
+
+        if requested_points > wallet.points_balance:
+            return Response(
+                {'error': f'رصيدك الحالي {wallet.points_balance} نقطة فقط.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if requested_points > max_discount:
+            return Response(
+                {'error': f'أقصى عدد نقاط يمكن استخدامه لهذا الطلب هو {max_discount} نقطة.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        wallet.redeem(requested_points, payment_request=pr)
+        pr.points_used = requested_points
+        pr.points_discount_amount = requested_points  # 1 نقطة = 1 ريال
+        pr.save(update_fields=['points_used', 'points_discount_amount'])
+
+        return Response(PaymentRequestSerializer(pr).data, status=status.HTTP_200_OK)
+
+
+class RemovePointsView(APIView):
+    """
+    POST /payments/<payment_request_id>/remove-points/
+    العميل يلغي استخدام النقاط اللي طبقها قبل ما يختار طريقة الدفع
+    """
+    permission_classes = [IsCustomer]
+
+    def post(self, request, payment_request_id):
+        try:
+            pr = PaymentRequest.objects.get(id=payment_request_id)
+        except PaymentRequest.DoesNotExist:
+            return Response({'error': 'نموذج الدفع غير موجود.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if pr.customer_id != request.user.id:
+            return Response({'error': 'غير مصرح.'}, status=status.HTTP_403_FORBIDDEN)
+
+        if pr.status != 'awaiting_method':
+            return Response(
+                {'error': 'لا يمكن إلغاء النقاط بعد اختيار طريقة الدفع.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if pr.points_used <= 0:
+            return Response({'error': 'لا توجد نقاط مستخدمة على هذا الطلب.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        wallet, _ = CustomerWallet.objects.get_or_create(customer=request.user)
+        wallet.refund(pr.points_used, payment_request=pr)
+
+        pr.points_used = 0
+        pr.points_discount_amount = 0
+        pr.save(update_fields=['points_used', 'points_discount_amount'])
+
+        return Response(PaymentRequestSerializer(pr).data, status=status.HTTP_200_OK)
+
+
+class CustomerWalletView(APIView):
+    """
+    GET /customer/points-wallet/
+    شاشة "نقاطي" للعميل — رصيده وسجل حركاته
+    """
+    permission_classes = [IsCustomer]
+
+    def get(self, request):
+        wallet, _ = CustomerWallet.objects.get_or_create(customer=request.user)
+        transactions = wallet.transactions.all()[:50]
+        return Response(
+            {
+                'wallet': CustomerWalletSerializer(wallet).data,
+                'recent_transactions': CustomerPointsTransactionSerializer(transactions, many=True).data,
+            },
             status=status.HTTP_200_OK
         )

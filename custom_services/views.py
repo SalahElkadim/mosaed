@@ -794,11 +794,15 @@ class ProviderCustomCompletionFormView(APIView):
         user_type = getattr(request.auth, 'payload', {}).get('user_type')
         try:
             if user_type == 'admin':
-                return ServiceCompletionForm.objects.get(
+                return ServiceCompletionForm.objects.select_related(
+                    'payment_request'
+                ).get(
                     custom_request__id=request_id
                 )
             else:
-                return ServiceCompletionForm.objects.get(
+                return ServiceCompletionForm.objects.select_related(
+                    'payment_request'
+                ).get(
                     custom_request__id=request_id,
                     custom_request__accepted_provider=request.user
                 )
@@ -1378,7 +1382,7 @@ class CustomerConfirmProviderArrivalCustomRequestView(APIView):
 
     def post(self, request, request_id):
         try:
-            form = ServiceCompletionForm.objects.get(
+            form = ServiceCompletionForm.objects.select_related('payment_request').get(
                 custom_request__id=request_id,
                 custom_request__customer=request.user
             )
@@ -1493,10 +1497,6 @@ class ProviderCustomPreviousWorkView(APIView):
     
 
 class ProviderCustomCompletionFormListView(APIView):
-    """
-    GET /provider/custom-requests/completion-forms/?is_finished=true
-    الفني يشوف كل نماذج الإتمام الخاصة بطلباته المخصصة (Custom Requests)
-    """
     permission_classes = [IsProvider]
 
     def get(self, request):
@@ -1509,6 +1509,7 @@ class ProviderCustomCompletionFormListView(APIView):
             'custom_request',
             'custom_request__specialization',
             'custom_request__address',
+            'payment_request',  # ← جديد — يمنع query إضافي لكل عنصر في اللستة
         ).order_by('-created_at')
 
         if is_finished_param == 'true':
@@ -1520,7 +1521,7 @@ class ProviderCustomCompletionFormListView(APIView):
             ProviderCustomCompletionFormListSerializer(forms, many=True).data,
             status=status.HTTP_200_OK
         )
-    
+
 class CustomerCustomCompletionFormView(APIView):
     """
     GET /custom-requests/<request_id>/completion/
@@ -1530,7 +1531,7 @@ class CustomerCustomCompletionFormView(APIView):
 
     def get(self, request, request_id):
         try:
-            form = ServiceCompletionForm.objects.get(
+            form = ServiceCompletionForm.objects.select_related('payment_request').get(
                 custom_request__id=request_id,
                 custom_request__customer=request.user
             )

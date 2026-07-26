@@ -5,7 +5,7 @@ wrapper بسيط حوالين _create_and_send الموجودة في custom_serv
 عشان أي حد يبعت إشعار دفع من غير ما يعرف تفاصيل الـ groups والـ payload.
 """
 from custom_services.signals import _create_and_send
-from custom_services.consumers import provider_personal_group
+from custom_services.consumers import provider_personal_group, customer_personal_group
 
 
 def notify_provider_payment_received(provider_id, payment_request):
@@ -53,4 +53,40 @@ def notify_provider_account_unblocked(provider_id):
         body='تم سداد المستحقات بنجاح، يمكنك استخدام التطبيق بشكل طبيعي الآن',
         data={},
         group_name=provider_personal_group(provider_id),
+    )
+
+
+def notify_customer_payment_required(customer_id, custom_request):
+    """
+    إشعار للعميل إن الخدمة خلصت ووقت الدفع جه. الـ data بتاعة الإشعار
+    لازم تحمل custom_request_id عشان الفرونت يقدر ينادي مباشرة على:
+    GET /payments/by-custom-request/<custom_request_id>/
+    """
+    data = {
+        'custom_request_id': str(custom_request.id),
+    }
+    _create_and_send(
+        recipient_type='customer',
+        recipient_id=customer_id,
+        event='payment_required',
+        title='الخدمة اكتملت',
+        body='خدمتك اكتملت، الرجاء إتمام عملية الدفع.',
+        data=data,
+        group_name=customer_personal_group(customer_id),
+    )
+
+def notify_customer_points_credited(customer_id, points_transaction):
+    """بعد ما النقاط تتحول من pending لرصيد فعلي — إشعار للعميل"""
+    data = {
+        'points': str(points_transaction.points),
+        'payment_request_id': str(points_transaction.payment_request_id) if points_transaction.payment_request_id else None,
+    }
+    _create_and_send(
+        recipient_type='customer',
+        recipient_id=customer_id,
+        event='points_credited',
+        title='حصلت على نقاط جديدة!',
+        body=f'تم إضافة {points_transaction.points} نقطة لمحفظتك',
+        data=data,
+        group_name=customer_personal_group(customer_id),
     )

@@ -472,8 +472,6 @@ class ServiceOfferUpdateSerializer(serializers.Serializer):
         instance.save(update_fields=list(validated_data.keys()) + ['updated_at'])
         return instance
     
-
-
 class ProviderCustomCompletionFormListSerializer(serializers.Serializer):
     id                  = serializers.UUIDField()
     request_id          = serializers.SerializerMethodField()
@@ -481,6 +479,8 @@ class ProviderCustomCompletionFormListSerializer(serializers.Serializer):
     specialization_name = serializers.SerializerMethodField()
     customer_address    = serializers.SerializerMethodField()
     final_price         = serializers.SerializerMethodField()
+    payment_request_id  = serializers.SerializerMethodField()  # ← جديد
+    payment_status      = serializers.SerializerMethodField()  # ← جديد (مفيد للفلاتر يعرض حالة الدفع في نفس الكارت)
     status              = serializers.CharField()
     is_finished         = serializers.BooleanField()
     started_at          = serializers.DateTimeField()
@@ -521,3 +521,23 @@ class ProviderCustomCompletionFormListSerializer(serializers.Serializer):
             return None
         accepted_offer = obj.custom_request.offers.filter(status='accepted').first()
         return str(accepted_offer.final_price) if accepted_offer else None
+
+    def get_payment_request_id(self, obj):
+        """
+        لو الـ completion form ده اتعمله finish بالفعل، هيكون فيه
+        PaymentRequest مربوط بيه (OneToOne). الفني محتاج الـ id ده
+        عشان ينادي confirm-cash/ لو العميل اختار الدفع كاش.
+        """
+        payment_request = getattr(obj, 'payment_request', None)
+        return str(payment_request.id) if payment_request else None
+
+    def get_payment_status(self, obj):
+        """
+        حالة الدفع الحالية — مفيدة للفلاتر يعرض تاج/badge في الكارت
+        (مثلاً "بانتظار اختيار طريقة الدفع" أو "بانتظار تأكيد الكاش")
+        من غير ما يحتاج نداء API إضافي منفصل.
+        """
+        payment_request = getattr(obj, 'payment_request', None)
+        return payment_request.status if payment_request else None
+    
+

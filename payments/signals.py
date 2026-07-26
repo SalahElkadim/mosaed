@@ -1,8 +1,10 @@
 from django.db.models.signals import pre_save, post_save
 from django.dispatch import receiver
+from django.db import transaction
 
 from existedservices.models import ServiceCompletionForm
-from .models import PaymentRequest
+from .models import PaymentRequest,CustomerWallet, CustomerPointsTransaction
+from .utils.notifications import notify_customer_payment_required
 
 
 @receiver(pre_save, sender=ServiceCompletionForm)
@@ -27,7 +29,7 @@ def create_payment_request_on_finish(sender, instance, created, **kwargs):
     """
     لما نموذج الإتمام يتحول لـ is_finished=True، ولو ده طلب مخصص
     (custom_request مش None)، اعمل PaymentRequest تلقائيًا مع snapshot
-    من الـ ServiceOffer المقبول.
+    من الـ ServiceOffer المقبول، وبعت إشعار للعميل إن وقت الدفع جه.
 
     existedservices (booking) برة النطاق ده تمامًا — مفيش أي تعامل
     مالي جوه التطبيق لخدماته الجاهزة.
@@ -40,24 +42,74 @@ def create_payment_request_on_finish(sender, instance, created, **kwargs):
 
     custom_request = instance.custom_request
     if not custom_request:
-        # ده completion form بتاع booking عادي — مش من اهتمامنا هنا
         return
 
-    # already عندنا PaymentRequest؟ (get_or_create احتياطًا من أي تكرار signal)
     if hasattr(instance, 'payment_request'):
         return
 
     accepted_offer = custom_request.offers.filter(status='accepted').first()
     if not accepted_offer:
-        # حالة غير متوقعة (الطلب اتعمله finish من غير عرض مقبول) — بنتجاهلها
-        # بدل ما نكسر الـ save بتاع completion form
         return
 
-    PaymentRequest.objects.get_or_create(
+    payment_request, was_created = PaymentRequest.objects.get_or_create(
         completion_form=instance,
         defaults={
             'amount':         accepted_offer.final_price,
             'provider_share': accepted_offer.provider_price,
             'platform_share': accepted_offer.platform_fee,
         }
+    )
+
+    if was_created:
+        # transaction.on_commit مش لازمة هنا فعليًا لأن _create_and_send
+        # نفسها بتستخدم on_commit جواها، بس مفيش ضرر من تركها كطبقة أمان
+        # إضافية لو حصل تعديل مستقبلي في _create_and_send
+        transaction.on_commit(
+            lambda: notify_customer_payment_required(
+                custom_request.customer_id,
+                custom_request
+            )
+        )
+
+from .tasks import credit_customer_points_task, POINTS_EARN_PERCENTAGE, POINTS_CREDIT_DELAY_SECONDS
+
+
+def schedule_points_for_payment(payment_request):
+    """
+    بتتنادى مرة واحدة يدويًا بعد ما الدفع الأونلاين ينجح فعليًا (من
+    _finalize_online_payment في views.py — مش post_save signal عادي،
+    عشان نضمن إنها بتتنفذ بس عند النجاح الفعلي مش أي save).
+
+    بتحسب النقاط على final_amount (المبلغ المدفوع فعليًا بعد أي خصم
+    نقاط سابق، مش المبلغ الأصلي) — عشان العميل ميكسبش نقاط على الجزء
+    اللي دفعه بنقاط أصلاً.
+    """
+    if payment_request.payment_method != 'online':
+        return  # النقاط على الأونلاين بس
+
+    customer = payment_request.customer
+    if not customer:
+        return
+
+    points = round(payment_request.final_amount * POINTS_EARN_PERCENTAGE, 2)
+    if points <= 0:
+        return
+
+    wallet, _ = CustomerWallet.objects.get_or_create(customer=customer)
+
+    txn = CustomerPointsTransaction.objects.create(
+        wallet=wallet,
+        points=points,
+        transaction_type='earned_pending',
+        payment_request=payment_request,
+        balance_after=None,  # لسه معلّقة، مش محسوبة على الرصيد
+    )
+
+    # الجدولة بتحصل بعد commit الـ transaction الحالية عشان نضمن إن
+    # CustomerPointsTransaction فعلاً اتسجلت في الداتابيز قبل ما
+    # الـ Celery worker يحاول يقراها
+    transaction.on_commit(
+        lambda: credit_customer_points_task.apply_async(
+            args=[txn.id], countdown=POINTS_CREDIT_DELAY_SECONDS
+        )
     )

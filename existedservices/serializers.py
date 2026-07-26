@@ -460,25 +460,43 @@ class CompletionMediaWriteSerializer(serializers.ModelSerializer):
 
 class ServiceCompletionFormSerializer(serializers.ModelSerializer):
     """للعرض — فني وأدمن وعميل"""
-    media         = CompletionMediaSerializer(many=True, read_only=True)
-    booking_id    = serializers.UUIDField(source='booking.id', read_only=True)
-    previous_work = serializers.SerializerMethodField()
+    media               = CompletionMediaSerializer(many=True, read_only=True)
+    booking_id          = serializers.UUIDField(source='booking.id', read_only=True)
+    previous_work       = serializers.SerializerMethodField()
+    payment_request_id  = serializers.SerializerMethodField()  # ← جديد
+    payment_status      = serializers.SerializerMethodField()  # ← جديد
 
     class Meta:
         model  = ServiceCompletionForm
         fields = [
             'id', 'booking_id', 'notes',
-            'status', 'started_at',                      # ← جديد
+            'status', 'started_at',
             'is_finished', 'finished_at',
-            'media', 'previous_work', 'created_at', 'updated_at'
+            'media', 'previous_work',
+            'payment_request_id', 'payment_status',   # ← جديد
+            'created_at', 'updated_at'
         ]
         read_only_fields = fields
+
     def get_previous_work(self, obj):
         try:
             work = obj.previous_work
         except PreviousWork.DoesNotExist:
             return None
         return PreviousWorkSerializer(work).data
+
+    def get_payment_request_id(self, obj):
+        """
+        بترجع None تلقائيًا للبوكينج العادي (existedservices) لأنه أصلاً
+        مفيش PaymentRequest بيتعمل ليه — النظام المالي بيطبق بس على
+        الطلبات المخصصة (custom_request مش None).
+        """
+        payment_request = getattr(obj, 'payment_request', None)
+        return str(payment_request.id) if payment_request else None
+
+    def get_payment_status(self, obj):
+        payment_request = getattr(obj, 'payment_request', None)
+        return payment_request.status if payment_request else None
 
 class ServiceCompletionFormUpdateSerializer(serializers.ModelSerializer):
     """الفني يضيف ملاحظات ويعمل finish"""

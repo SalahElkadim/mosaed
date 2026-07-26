@@ -2,20 +2,21 @@ from rest_framework import serializers
 from .models import (
     PaymentRequest, OnlinePaymentAttempt, ProviderDue, DueCollectionItem,
     ProviderWallet, WalletTransaction, PayoutBatch, PayoutBatchItem,
-    DueCollectionBatch,
+    DueCollectionBatch,DueTransaction
 )
-
 
 class PaymentRequestSerializer(serializers.ModelSerializer):
     """لعرض نموذج الدفع — للعميل والفني"""
     request_id    = serializers.UUIDField(source='custom_request.id', read_only=True)
     request_title = serializers.CharField(source='custom_request.title', read_only=True)
+    final_amount  = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)  # ← جديد
 
     class Meta:
         model  = PaymentRequest
         fields = [
             'id', 'request_id', 'request_title',
             'amount', 'provider_share', 'platform_share',
+            'points_used', 'points_discount_amount', 'final_amount',  # ← جديد
             'payment_method', 'status',
             'created_at', 'paid_at',
         ]
@@ -181,3 +182,26 @@ class InitiateOnlinePaymentSerializer(serializers.Serializer):
         if not value.strip():
             raise serializers.ValidationError("التوكن مطلوب.")
         return value.strip()
+    
+class DueTransactionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = DueTransaction
+        fields = ['id', 'amount', 'transaction_type', 'balance_after', 'created_at']
+        read_only_fields = fields
+
+
+from .models import CustomerWallet, CustomerPointsTransaction  # يضاف مع الـ imports فوق
+
+
+class CustomerWalletSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = CustomerWallet
+        fields = ['points_balance', 'total_earned_points', 'total_redeemed_points', 'updated_at']
+        read_only_fields = fields
+
+
+class CustomerPointsTransactionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = CustomerPointsTransaction
+        fields = ['id', 'points', 'transaction_type', 'balance_after', 'created_at']
+        read_only_fields = fields
