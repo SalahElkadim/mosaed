@@ -85,6 +85,16 @@ class PaymentRequest(models.Model):
         return cr.customer if cr else None
 
     @property
+    def customer_id(self):
+        cr = self.custom_request
+        return cr.customer_id if cr else None
+
+    @property
+    def provider_id(self):
+        cr = self.custom_request
+        return cr.accepted_provider_id if cr else None
+
+    @property
     def final_amount(self):
         """المبلغ الفعلي المطلوب دفعه بعد خصم النقاط (لو اتستخدمت)"""
         return self.amount - self.points_discount_amount

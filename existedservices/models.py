@@ -287,7 +287,11 @@ class ServiceCompletionForm(models.Model):
         ordering     = ['-created_at']
 
     def __str__(self):
-        return f"CompletionForm for Booking#{self.booking.id} — finished={self.is_finished}"
+        if self.booking:
+            return f"CompletionForm for Booking#{self.booking.id} — finished={self.is_finished}"
+        if self.custom_request:
+            return f"CompletionForm for CustomRequest#{self.custom_request.id} — finished={self.is_finished}"
+        return f"CompletionForm#{self.id} — finished={self.is_finished}"
 
 class CompletionMedia(models.Model):
     MEDIA_TYPE_CHOICES = [
