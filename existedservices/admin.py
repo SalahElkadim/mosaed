@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import ExistedService, ServiceAttribute, Booking, BookingItem
+from .models import ExistedService, ServiceAttribute, Booking, BookingItem, ServiceCompletionForm
 
 
 # ==================== SERVICE ====================
@@ -47,3 +47,6 @@ class BookingAdmin(admin.ModelAdmin):
 class BookingItemAdmin(admin.ModelAdmin):
     list_display    = ['booking', 'attribute', 'value', 'unit_cost_snapshot', 'cost']
     readonly_fields = ['unit_cost_snapshot', 'cost']
+
+
+admin.site.register(ServiceCompletionForm)

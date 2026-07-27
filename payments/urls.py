@@ -29,14 +29,11 @@ urlpatterns = [
     path('admin/payments/payout-items/<uuid:item_id>/confirm/', AdminPayoutBatchItemConfirmView.as_view()),
     path('admin/payments/due-collection-batches/', AdminDueCollectionBatchListView.as_view()),
     path('payments/due-collection/<uuid:item_id>/', DueCollectionItemDetailView.as_view(), name='due-collection-detail'),
-path('payments/due-collection/<uuid:item_id>/callback/', DueCollectionCallbackView.as_view(), name='due-collection-callback'),
+    path('payments/due-collection/<uuid:item_id>/callback/', DueCollectionCallbackView.as_view(), name='due-collection-callback'),
     path('admin/payments/dashboard-overview/', AdminDashboardOverviewView.as_view()),
-     path(
-        'payments/by-custom-request/<uuid:custom_request_id>/',
-        PaymentRequestByCustomRequestView.as_view()
-    ),
-path('provider/dues/', ProviderDueDetailView.as_view()),
-path('payments/<uuid:payment_request_id>/apply-points/', ApplyPointsView.as_view()),
+    path('payments/by-custom-request/<uuid:custom_request_id>/',PaymentRequestByCustomRequestView.as_view()),
+    path('provider/dues/', ProviderDueDetailView.as_view()),
+    path('payments/<uuid:payment_request_id>/apply-points/', ApplyPointsView.as_view()),
     path('payments/<uuid:payment_request_id>/remove-points/', RemovePointsView.as_view()),
     path('customer/points-wallet/', CustomerWalletView.as_view()),
 ]
