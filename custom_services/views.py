@@ -1387,20 +1387,22 @@ class CustomerConfirmProviderArrivalCustomRequestView(APIView):
                 custom_request__customer=request.user
             )
         except ServiceCompletionForm.DoesNotExist:
-            return Response(
-                {'error': 'نموذج الإتمام غير موجود.'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            return Response({'error': 'نموذج الإتمام غير موجود.'}, status=status.HTTP_404_NOT_FOUND)
 
         if form.status == 'provider_arrived':
-            return Response(
-                {'error': 'تم تأكيد وصول الفني بالفعل.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({'error': 'تم تأكيد وصول الفني بالفعل.'}, status=status.HTTP_400_BAD_REQUEST)
 
         form.status     = 'provider_arrived'
         form.started_at = timezone.now()
         form.save(update_fields=['status', 'started_at'])
+
+        # ← الإضافة: حرّك CustomRequest نفسه لـ in_progress دلوقتي،
+        # عشان لما الفني يعمل finish بعدين، الشرط في ProviderCustomCompletionFormView
+        # يتحقق فعليًا ويحوّل الطلب لـ completed
+        custom_request = form.custom_request
+        if custom_request and custom_request.status == 'accepted':
+            custom_request.status = 'in_progress'
+            custom_request.save(update_fields=['status'])
 
         return Response(
             ServiceCompletionFormSerializer(form).data,
