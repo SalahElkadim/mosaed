@@ -6,7 +6,8 @@ from django.dispatch import receiver
 from decimal import Decimal
 
 from existedservices.models import ServiceCompletionForm
-from .models import PaymentRequest, CustomerWallet, CustomerPointsTransaction, PlatformSettings
+from .models import PaymentRequest, CustomerWallet, CustomerPointsTransaction
+from custom_services.models import  PlatformSettings
 from .utils.notifications import notify_customer_payment_required
 
 

@@ -5,7 +5,7 @@ from django.utils import timezone
 from django.db import transaction
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework import status
+from rest_framework import status, generics
 from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser
 
 from accounts.permissions import IsCustomer, IsProvider
@@ -838,3 +838,21 @@ class PaymentRequestByBookingView(APIView):
             return Response({'error': 'غير مصرح.'}, status=status.HTTP_403_FORBIDDEN)
 
         return Response(PaymentRequestSerializer(pr).data, status=status.HTTP_200_OK)
+    
+
+
+class CustomerPointsTransactionListView(generics.ListAPIView):
+    """
+    سجل معاملات النقاط الخاصة بالعميل الحالي — الأحدث أولًا.
+    """
+    serializer_class   = CustomerPointsTransactionSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        customer = self.request.user
+        wallet, _ = CustomerWallet.objects.get_or_create(customer=customer)
+        return (
+            CustomerPointsTransaction.objects
+            .filter(wallet=wallet)
+            .order_by('-created_at')
+        )

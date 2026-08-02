@@ -593,3 +593,5 @@ class PointsMarketingExpense(models.Model):
 
     def __str__(self):
         return f"مصروف تسويقي {self.amount} ر.س — {self.payment_request_id}"
+    
+
