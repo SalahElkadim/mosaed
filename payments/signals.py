@@ -3,12 +3,12 @@ from channels.layers import get_channel_layer
 from django.db import transaction
 from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
-from decimal import Decimal
-
+from accounts.models import MarketingCode, MarketingCodeUsage  # يضاف مع الاستيراد
 from existedservices.models import ServiceCompletionForm
 from .models import PaymentRequest, CustomerWallet, CustomerPointsTransaction
 from custom_services.models import  PlatformSettings
 from .utils.notifications import notify_customer_payment_required
+from decimal import Decimal, ROUND_HALF_UP
 
 
 EXISTED_SERVICES_COMMISSION_KEY = 'existed_services_commission'
@@ -96,6 +96,9 @@ def create_payment_request_on_finish(sender, instance, created, **kwargs):
     )
 
     if was_created:
+        if custom_request:  # ماركتنج كود مقصور على custom_request بس
+            _apply_marketing_code_discount(payment_request, custom_request.customer)
+
         transaction.on_commit(
             lambda: notify_customer_payment_required(customer_id, payment_request))
 
@@ -137,3 +140,41 @@ def schedule_points_for_payment(payment_request):
             args=[txn.id], countdown=POINTS_CREDIT_DELAY_SECONDS
         )
     )
+
+def _apply_marketing_code_discount(payment_request, customer):
+    """
+    لو ده أول custom request للعميل، وعنده signup_marketing_code لسه
+    مستخدمش، يتطبق الخصم ويتسجل في MarketingCodeUsage.
+    """
+    if not customer or customer.marketing_discount_used:
+        return
+
+    code = customer.signup_marketing_code
+    if not code or not code.is_active:
+        return
+
+    # هل ده أول payment_request خاص بطلبات custom request للعميل ده؟
+    already_has_other = PaymentRequest.objects.filter(
+        completion_form__custom_request__customer_id=customer.id
+    ).exclude(pk=payment_request.pk).exists()
+
+    if already_has_other:
+        return
+
+    discount = (payment_request.amount * code.discount_percentage / Decimal('100')).quantize(
+        Decimal('0.01'), rounding=ROUND_HALF_UP
+    )
+    discount = min(discount, payment_request.amount)  # حماية دفاعية — الخصم مايتعداش المبلغ
+
+    payment_request.marketing_discount_amount = discount
+    payment_request.save(update_fields=['marketing_discount_amount'])
+
+    MarketingCodeUsage.objects.create(
+        marketing_code=code,
+        customer=customer,
+        payment_request=payment_request,
+        discount_amount=discount,
+    )
+
+    customer.marketing_discount_used = True
+    customer.save(update_fields=['marketing_discount_used'])

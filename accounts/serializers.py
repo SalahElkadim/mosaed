@@ -2,7 +2,7 @@
 
 from rest_framework import serializers
 from django.utils import timezone
-from .models import Admin, Customer, Provider, OTPVerification, BiometricToken, CustomerAddress,Specialization,Region,City,ProviderAddress
+from .models import Admin, Customer, Provider,MarketingCode, MarketingCodeUsage , OTPVerification, BiometricToken, CustomerAddress,Specialization,Region,City,ProviderAddress
 
 
 # ==================== ADMIN ====================
@@ -369,3 +369,69 @@ class RegionWriteSerializer(serializers.ModelSerializer):
         return attrs
 
 
+from .models import MarketingCode, MarketingCodeUsage  # يضاف مع الاستيراد
+
+
+class CustomerRegisterSerializer(serializers.ModelSerializer):
+    marketing_code = serializers.CharField(write_only=True, required=False, allow_blank=True)
+
+    class Meta:
+        model = Customer
+        fields = ['name', 'phone_number', 'email', 'marketing_code']
+
+    def validate_phone_number(self, value):
+        if Customer.objects.filter(phone_number=value).exists():
+            raise serializers.ValidationError("This phone number is already registered.")
+        return value
+
+    def validate_marketing_code(self, value):
+        if not value:
+            return None
+        try:
+            code = MarketingCode.objects.get(code__iexact=value.strip(), is_active=True)
+        except MarketingCode.DoesNotExist:
+            raise serializers.ValidationError("كود التسويق غير صحيح أو غير فعّال.")
+        return code
+
+    def create(self, validated_data):
+        marketing_code = validated_data.pop('marketing_code', None)
+        customer = Customer.objects.create(**validated_data)
+        if marketing_code:
+            customer.signup_marketing_code = marketing_code
+            customer.save(update_fields=['signup_marketing_code'])
+        return customer
+
+
+class MarketingCodeSerializer(serializers.ModelSerializer):
+    signups_count = serializers.IntegerField(source='signed_up_customers.count', read_only=True)
+    usages_count = serializers.IntegerField(source='usages.count', read_only=True)
+
+    class Meta:
+        model = MarketingCode
+        fields = ['id', 'code', 'owner_name', 'discount_percentage',
+                  'is_active', 'signups_count', 'usages_count', 'created_at']
+        read_only_fields = ['id', 'created_at']
+
+
+class MarketingCodeWriteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MarketingCode
+        fields = ['code', 'owner_name', 'discount_percentage', 'is_active']
+
+    def validate_code(self, value):
+        qs = MarketingCode.objects.filter(code__iexact=value.strip())
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError("هذا الكود مستخدم بالفعل.")
+        return value.strip()
+
+
+class MarketingCodeUsageSerializer(serializers.ModelSerializer):
+    customer_name = serializers.CharField(source='customer.name', read_only=True)
+    customer_phone = serializers.CharField(source='customer.phone_number', read_only=True)
+
+    class Meta:
+        model = MarketingCodeUsage
+        fields = ['id', 'customer_name', 'customer_phone', 'discount_amount', 'used_at']
+        read_only_fields = fields

@@ -10,9 +10,9 @@ from rest_framework_simplejwt.tokens import RefreshToken
 import random
 from .permissions import IsCustomerOrAdmin,IsProviderOrAdmin # Add this import at the top if not already imported
 from utils.cloudinary import upload_image, upload_video
-from .models import Admin, Customer, Provider, OTPVerification, BiometricToken, CustomerAddress,ProviderAddress,City,Region
+from .models import Admin, Customer, Provider, MarketingCode, MarketingCodeUsage ,OTPVerification, BiometricToken, CustomerAddress,ProviderAddress,City,Region
 from .serializers import (
-    AdminLoginSerializer, AdminSerializer,
+    AdminLoginSerializer, AdminSerializer,MarketingCodeSerializer, MarketingCodeWriteSerializer, MarketingCodeUsageSerializer,
     CustomerRegisterSerializer, CustomerSerializer,
     ProviderRegisterSerializer, ProviderSerializer,CustomerAdminSerializer,CitySerializer,
     SendOTPSerializer, VerifyOTPSerializer,CustomerUpdateSerializer, CityWriteSerializer, ProviderAddressSerializer,RegionWriteSerializer, ProviderUpdateSerializer,RegisterBiometricSerializer, BiometricLoginSerializer, CustomerAddressSerializer
@@ -1371,3 +1371,70 @@ class NearbyProvidersView(APIView):
         dlng = lng2 - lng1
         a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlng/2)**2
         return R * 2 * atan2(sqrt(a), sqrt(1 - a))
+    
+
+
+class AdminMarketingCodeListView(APIView):
+    """
+    GET  /admin/marketing-codes/   ← كل الأكواد + عدد التسجيلات والاستخدامات الفعلية
+    POST /admin/marketing-codes/   ← إنشاء كود جديد لمسوّق
+    """
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        codes = MarketingCode.objects.all()
+        return Response(MarketingCodeSerializer(codes, many=True).data)
+
+    def post(self, request):
+        serializer = MarketingCodeWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        code = serializer.save()
+        return Response(MarketingCodeSerializer(code).data, status=status.HTTP_201_CREATED)
+
+
+class AdminMarketingCodeDetailView(APIView):
+    """PATCH / DELETE — تعديل أو إلغاء تفعيل كود"""
+    permission_classes = [IsAdminUser]
+
+    def get_object(self, code_id):
+        try:
+            return MarketingCode.objects.get(id=code_id)
+        except MarketingCode.DoesNotExist:
+            return None
+
+    def patch(self, request, code_id):
+        code = self.get_object(code_id)
+        if not code:
+            return Response({'error': 'الكود غير موجود.'}, status=404)
+        serializer = MarketingCodeWriteSerializer(code, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(MarketingCodeSerializer(code).data)
+
+    def delete(self, request, code_id):
+        code = self.get_object(code_id)
+        if not code:
+            return Response({'error': 'الكود غير موجود.'}, status=404)
+        code.delete()
+        return Response({'message': 'تم الحذف بنجاح.'}, status=204)
+
+
+class AdminMarketingCodeUsageView(APIView):
+    """
+    GET /admin/marketing-codes/<code_id>/usages/
+    تقرير تفصيلي: مين استخدم الكود فعليًا (حقق أول طلب) — على أساسه
+    الأدمن بيحاسب المسوّق.
+    """
+    permission_classes = [IsAdminUser]
+
+    def get(self, request, code_id):
+        try:
+            code = MarketingCode.objects.get(id=code_id)
+        except MarketingCode.DoesNotExist:
+            return Response({'error': 'الكود غير موجود.'}, status=404)
+
+        usages = code.usages.select_related('customer').all()
+        return Response({
+            'code': MarketingCodeSerializer(code).data,
+            'usages': MarketingCodeUsageSerializer(usages, many=True).data,
+        })

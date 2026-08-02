@@ -139,7 +139,7 @@ class InitiateOnlinePaymentView(APIView):
 
         try:
             payment_data = create_payment_link(
-                amount_halalas=int(pr.amount * 100),
+                amount_halalas=int(pr.final_amount * 100),
                 description=f"دفع طلب خدمة #{pr.custom_request_id}",
                 callback_url=callback_url,
                 token=token,

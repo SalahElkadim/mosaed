@@ -51,6 +51,7 @@ class PaymentRequest(models.Model):
     platform_share = models.DecimalField(max_digits=10, decimal_places=2)  # = platform_fee
     points_used            = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     points_discount_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    marketing_discount_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     payment_method = models.CharField(
         max_length=10, choices=METHOD_CHOICES, null=True, blank=True
     )
@@ -97,7 +98,7 @@ class PaymentRequest(models.Model):
     @property
     def final_amount(self):
         """المبلغ الفعلي المطلوب دفعه بعد خصم النقاط (لو اتستخدمت)"""
-        return self.amount - self.points_discount_amount
+        return self.amount - self.points_discount_amount- self.marketing_discount_amount
 
     def mark_paid(self):
         if self.status != 'paid':

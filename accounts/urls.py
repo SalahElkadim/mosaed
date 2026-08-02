@@ -5,7 +5,7 @@ from .views import (
     CustomerRegisterView, ProviderRegisterView,
     LogoutView,
     CustomerProfileView, ProviderProfileView,
-    ProviderBlockView,
+    ProviderBlockView,AdminMarketingCodeListView, AdminMarketingCodeDetailView, AdminMarketingCodeUsageView,
     ProviderListView,
     ProviderDetailView,ProviderApproveView,RegisterBiometricView, BiometricLoginView, RevokeBiometricView,
     CustomerAddressView, CustomerAddressDetailView, ReviewCreateView,CityListView,ProviderAddressView,CityDetailView,
@@ -68,6 +68,10 @@ urlpatterns = [
     path('admin/providers/<uuid:provider_id>/addresses/', AdminProviderAddressView.as_view()),
     path('admin/providers/<uuid:provider_id>/addresses/<uuid:address_id>/', AdminProviderAddressDetailView.as_view()),
     path('providers/nearby/', NearbyProvidersView.as_view(), name='nearby-providers'),
-
-
+    path('admin/marketing-codes/', AdminMarketingCodeListView.as_view()),
+    path('admin/marketing-codes/<uuid:code_id>/', AdminMarketingCodeDetailView.as_view()),
+    path('admin/marketing-codes/<uuid:code_id>/usages/', AdminMarketingCodeUsageView.as_view()),
 ]
+    
+
+

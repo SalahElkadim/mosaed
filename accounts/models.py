@@ -168,7 +168,13 @@ class Customer(AbstractBaseUser):
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     last_login = models.DateTimeField(null=True, blank=True)
-
+    signup_marketing_code = models.ForeignKey(
+        'MarketingCode',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='signed_up_customers'
+    )
+    marketing_discount_used = models.BooleanField(default=False)
     objects = CustomerManager()
 
     USERNAME_FIELD = 'phone_number'
@@ -470,3 +476,61 @@ class PreviousWork(models.Model):
 
     def __str__(self):
         return f"{self.provider.name} - {self.media_type} - {self.title or self.id}"
+    
+
+# ==================== MARKETING CODE ====================
+
+class MarketingCode(models.Model):
+    """
+    كود تسويقي بيديه المسوّق (شخص خارجي، مش بالضرورة عميل في التطبيق)
+    للعملاء الجدد. بيتسجل وقت التسجيل بس، وبيدي خصم على أول custom
+    request للعميل. الأدمن بيتابع أداء كل كود من الداشبورد ويحاسب
+    المسوّق أوفلاين على حسب عدد الاستخدامات الفعلية.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    code = models.CharField(max_length=50, unique=True)
+    owner_name = models.CharField(max_length=255)  # اسم/بيانات المسوّق
+    discount_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=20)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'marketing_codes'
+        verbose_name = 'Marketing Code'
+        verbose_name_plural = 'Marketing Codes'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.code} — {self.owner_name} ({self.discount_percentage}%)"
+
+
+class MarketingCodeUsage(models.Model):
+    """
+    سجل الاستخدام الفعلي — بيتعمل لما العميل يحقق أول custom request
+    وياخد الخصم فعليًا (مش وقت التسجيل). ده اللي بيبني منه تقرير
+    المسوقين في لوحة التحكم.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    marketing_code = models.ForeignKey(
+        MarketingCode, on_delete=models.CASCADE, related_name='usages'
+    )
+    customer = models.OneToOneField(
+        Customer, on_delete=models.CASCADE, related_name='marketing_code_usage'
+    )
+    # FK بالـ string عشان نتجنب أي import مباشر من payments هنا
+    payment_request = models.OneToOneField(
+        'payments.PaymentRequest',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='marketing_code_usage'
+    )
+    discount_amount = models.DecimalField(max_digits=10, decimal_places=2)
+    used_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'marketing_code_usages'
+        verbose_name = 'Marketing Code Usage'
+        ordering = ['-used_at']
+
+    def __str__(self):
+        return f"{self.customer.name} استخدم {self.marketing_code.code} — خصم {self.discount_amount}"
