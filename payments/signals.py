@@ -1,19 +1,37 @@
-from django.db.models.signals import pre_save, post_save
-from django.dispatch import receiver
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
 from django.db import transaction
+from django.db.models.signals import post_save, pre_save
+from django.dispatch import receiver
+from decimal import Decimal
 
 from existedservices.models import ServiceCompletionForm
-from .models import PaymentRequest,CustomerWallet, CustomerPointsTransaction
+from .models import PaymentRequest, CustomerWallet, CustomerPointsTransaction, PlatformSettings
 from .utils.notifications import notify_customer_payment_required
+
+
+EXISTED_SERVICES_COMMISSION_KEY = 'existed_services_commission'
+DEFAULT_EXISTED_SERVICES_COMMISSION_PERCENTAGE = Decimal('20')  # fallback لو الإعداد مش موجود لسه
+
+
+def _get_existed_services_commission_percentage():
+    """
+    بيرجع نسبة عمولة المنصة على الخدمات الجاهزة (existedservices) من
+    PlatformSettings. لو الإعداد مش موجود، بيتعمل بقيمة افتراضية 20%
+    عشان النظام يفضل شغال حتى لو الأدمن لسه محددهاش يدويًا.
+    """
+    setting, created = PlatformSettings.objects.get_or_create(
+        key=EXISTED_SERVICES_COMMISSION_KEY,
+        defaults={'value': str(DEFAULT_EXISTED_SERVICES_COMMISSION_PERCENTAGE)}
+    )
+    try:
+        return Decimal(str(setting.value))
+    except (TypeError, ValueError, ArithmeticError):
+        return DEFAULT_EXISTED_SERVICES_COMMISSION_PERCENTAGE
 
 
 @receiver(pre_save, sender=ServiceCompletionForm)
 def _cache_old_finished_state(sender, instance, **kwargs):
-    """
-    بنخزن حالة is_finished القديمة قبل الحفظ، عشان نتأكد وقت الـ
-    post_save إن التحديث ده فعلاً أول مرة يتحول فيها لـ True
-    (نفس نمط _cache_old_offer_status في custom_services/signals.py)
-    """
     if instance.pk:
         try:
             old = ServiceCompletionForm.objects.get(pk=instance.pk)
@@ -27,12 +45,9 @@ def _cache_old_finished_state(sender, instance, **kwargs):
 @receiver(post_save, sender=ServiceCompletionForm)
 def create_payment_request_on_finish(sender, instance, created, **kwargs):
     """
-    لما نموذج الإتمام يتحول لـ is_finished=True، ولو ده طلب مخصص
-    (custom_request مش None)، اعمل PaymentRequest تلقائيًا مع snapshot
-    من الـ ServiceOffer المقبول، وبعت إشعار للعميل إن وقت الدفع جه.
-
-    existedservices (booking) برة النطاق ده تمامًا — مفيش أي تعامل
-    مالي جوه التطبيق لخدماته الجاهزة.
+    لما نموذج الإتمام يخلص (is_finished=True لأول مرة)، اعمل
+    PaymentRequest تلقائيًا — سواء كان الفورم مربوط بطلب مخصص
+    (custom_request) أو بحجز خدمة جاهزة (booking).
     """
     old_is_finished = getattr(instance, '_old_is_finished', False)
     just_finished   = (not old_is_finished) and instance.is_finished
@@ -40,52 +55,63 @@ def create_payment_request_on_finish(sender, instance, created, **kwargs):
     if not just_finished:
         return
 
-    custom_request = instance.custom_request
-    if not custom_request:
-        return
-
     if hasattr(instance, 'payment_request'):
         return
 
-    accepted_offer = custom_request.offers.filter(status='accepted').first()
-    if not accepted_offer:
+    custom_request = instance.custom_request
+    booking        = instance.booking
+
+    if custom_request:
+        accepted_offer = custom_request.offers.filter(status='accepted').first()
+        if not accepted_offer:
+            return
+
+        amount         = accepted_offer.final_price
+        provider_share = accepted_offer.provider_price
+        platform_share = accepted_offer.platform_fee
+        customer_id    = custom_request.customer_id
+
+    elif booking:
+        amount = booking.final_cost
+        if not amount or amount <= 0:
+            return
+
+        commission_percentage = _get_existed_services_commission_percentage()
+        platform_share = (amount * commission_percentage / Decimal('100')).quantize(Decimal('0.01'))
+        provider_share = amount - platform_share
+        customer_id    = booking.customer_id
+
+    else:
+        # الفورم مش مربوط بأي طلب/حجز فعلي (حالة نادرة/دفاعية) — متعملش دفع
         return
 
     payment_request, was_created = PaymentRequest.objects.get_or_create(
         completion_form=instance,
         defaults={
-            'amount':         accepted_offer.final_price,
-            'provider_share': accepted_offer.provider_price,
-            'platform_share': accepted_offer.platform_fee,
+            'amount':         amount,
+            'provider_share': provider_share,
+            'platform_share': platform_share,
         }
     )
 
     if was_created:
-        # transaction.on_commit مش لازمة هنا فعليًا لأن _create_and_send
-        # نفسها بتستخدم on_commit جواها، بس مفيش ضرر من تركها كطبقة أمان
-        # إضافية لو حصل تعديل مستقبلي في _create_and_send
         transaction.on_commit(
-            lambda: notify_customer_payment_required(
-                custom_request.customer_id,
-                custom_request
-            )
-        )
+            lambda: notify_customer_payment_required(customer_id, payment_request))
+
 
 from .tasks import credit_customer_points_task, POINTS_EARN_PERCENTAGE, POINTS_CREDIT_DELAY_SECONDS
 
 
 def schedule_points_for_payment(payment_request):
     """
-    بتتنادى مرة واحدة يدويًا بعد ما الدفع الأونلاين ينجح فعليًا (من
-    _finalize_online_payment في views.py — مش post_save signal عادي،
-    عشان نضمن إنها بتتنفذ بس عند النجاح الفعلي مش أي save).
-
-    بتحسب النقاط على final_amount (المبلغ المدفوع فعليًا بعد أي خصم
-    نقاط سابق، مش المبلغ الأصلي) — عشان العميل ميكسبش نقاط على الجزء
-    اللي دفعه بنقاط أصلاً.
+    النقاط بتتحسب على الطلبات المخصصة بس. الخدمات الجاهزة (booking)
+    مستبعدة تمامًا من نظام نقاط الولاء.
     """
     if payment_request.payment_method != 'online':
-        return  # النقاط على الأونلاين بس
+        return
+
+    if not payment_request.completion_form.custom_request_id:
+        return  # ← خط الدفاع: مفيش نقاط على existed services خالص
 
     customer = payment_request.customer
     if not customer:
@@ -102,12 +128,9 @@ def schedule_points_for_payment(payment_request):
         points=points,
         transaction_type='earned_pending',
         payment_request=payment_request,
-        balance_after=None,  # لسه معلّقة، مش محسوبة على الرصيد
+        balance_after=None,
     )
 
-    # الجدولة بتحصل بعد commit الـ transaction الحالية عشان نضمن إن
-    # CustomerPointsTransaction فعلاً اتسجلت في الداتابيز قبل ما
-    # الـ Celery worker يحاول يقراها
     transaction.on_commit(
         lambda: credit_customer_points_task.apply_async(
             args=[txn.id], countdown=POINTS_CREDIT_DELAY_SECONDS

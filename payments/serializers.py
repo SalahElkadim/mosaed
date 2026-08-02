@@ -6,17 +6,30 @@ from .models import (
 )
 
 class PaymentRequestSerializer(serializers.ModelSerializer):
-    """لعرض نموذج الدفع — للعميل والفني"""
-    request_id    = serializers.UUIDField(source='custom_request.id', read_only=True)
-    request_title = serializers.CharField(source='custom_request.title', read_only=True)
-    final_amount  = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)  # ← جديد
+    """لعرض نموذج الدفع — شغالة مع custom_request وbooking على السوا"""
+    request_id    = serializers.SerializerMethodField()
+    request_title = serializers.SerializerMethodField()
+    final_amount  = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+
+    def get_request_id(self, obj):
+        cf = obj.completion_form
+        target = cf.custom_request or cf.booking
+        return str(target.id) if target else None
+
+    def get_request_title(self, obj):
+        cf = obj.completion_form
+        if cf.custom_request:
+            return cf.custom_request.title
+        if cf.booking and cf.booking.service:
+            return cf.booking.service.title
+        return None
 
     class Meta:
         model  = PaymentRequest
         fields = [
             'id', 'request_id', 'request_title',
             'amount', 'provider_share', 'platform_share',
-            'points_used', 'points_discount_amount', 'final_amount',  # ← جديد
+            'points_used', 'points_discount_amount', 'final_amount',
             'payment_method', 'status',
             'created_at', 'paid_at',
         ]

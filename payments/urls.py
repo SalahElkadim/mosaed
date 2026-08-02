@@ -5,7 +5,7 @@ from .views import (
     MoyasarWebhookView,
     ConfirmCashPaymentView,
     ProviderDuesStatusView,
-    ProviderWalletView,
+    ProviderWalletView,PaymentRequestByBookingView,
     AdminPayoutBatchListView,ApplyPointsView, RemovePointsView, CustomerWalletView,
     AdminPayoutBatchItemConfirmView,ProviderDueDetailView,
     AdminDueCollectionBatchListView,DueCollectionItemDetailView,DueCollectionCallbackView,AdminDashboardOverviewView,PaymentRequestByCustomRequestView
@@ -36,4 +36,6 @@ urlpatterns = [
     path('payments/<uuid:payment_request_id>/apply-points/', ApplyPointsView.as_view()),
     path('payments/<uuid:payment_request_id>/remove-points/', RemovePointsView.as_view()),
     path('customer/points-wallet/', CustomerWalletView.as_view()),
+    path('payments/by-booking/<uuid:booking_id>/', PaymentRequestByBookingView.as_view()),
+
 ]

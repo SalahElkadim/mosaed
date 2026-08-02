@@ -56,15 +56,20 @@ def notify_provider_account_unblocked(provider_id):
     )
 
 
-def notify_customer_payment_required(customer_id, custom_request):
+def notify_customer_payment_required(customer_id, payment_request):
     """
-    إشعار للعميل إن الخدمة خلصت ووقت الدفع جه. الـ data بتاعة الإشعار
-    لازم تحمل custom_request_id عشان الفرونت يقدر ينادي مباشرة على:
-    GET /payments/by-custom-request/<custom_request_id>/
+    إشعار للعميل إن الخدمة اكتملت ووقت الدفع جه. الـ data بتحمل
+    payment_request_id (شغال مع custom request وbooking على السوا)
+    بالإضافة لـ custom_request_id لو الفورم مربوط بطلب مخصص، عشان
+    التوافق مع أي كود فرونت قديم بينادي by-custom-request/.
     """
     data = {
-        'custom_request_id': str(custom_request.id),
+        'payment_request_id': str(payment_request.id),
     }
+    custom_request_id = payment_request.completion_form.custom_request_id
+    if custom_request_id:
+        data['custom_request_id'] = str(custom_request_id)
+
     _create_and_send(
         recipient_type='customer',
         recipient_id=customer_id,
@@ -74,7 +79,7 @@ def notify_customer_payment_required(customer_id, custom_request):
         data=data,
         group_name=customer_personal_group(customer_id),
     )
-
+    
 def notify_customer_points_credited(customer_id, points_transaction):
     """بعد ما النقاط تتحول من pending لرصيد فعلي — إشعار للعميل"""
     data = {

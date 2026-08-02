@@ -705,6 +705,13 @@ class ApplyPointsView(APIView):
         if pr.customer_id != request.user.id:
             return Response({'error': 'غير مصرح.'}, status=status.HTTP_403_FORBIDDEN)
 
+        # ← جديد: النقاط متاحة على الطلبات المخصصة بس
+        if not pr.completion_form.custom_request_id:
+            return Response(
+                {'error': 'نقاط الولاء غير متاحة على الخدمات الجاهزة.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         if pr.status != 'awaiting_method':
             return Response(
                 {'error': 'لا يمكن استخدام النقاط بعد اختيار طريقة الدفع.'},
@@ -803,3 +810,31 @@ class CustomerWalletView(APIView):
             },
             status=status.HTTP_200_OK
         )
+    
+
+class PaymentRequestByBookingView(APIView):
+    """
+    GET /payments/by-booking/<booking_id>/
+    بترجع تفاصيل نموذج الدفع بناءً على booking_id مباشرة — مكافئة
+    لـ PaymentRequestByCustomRequestView بس للخدمات الجاهزة.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, booking_id):
+        try:
+            pr = PaymentRequest.objects.select_related(
+                'completion_form__booking'
+            ).get(completion_form__booking__id=booking_id)
+        except PaymentRequest.DoesNotExist:
+            return Response(
+                {'error': 'لا يوجد نموذج دفع لهذا الحجز بعد.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        user_type = getattr(request.auth, 'payload', {}).get('user_type')
+        if user_type == 'customer' and pr.customer_id != request.user.id:
+            return Response({'error': 'غير مصرح.'}, status=status.HTTP_403_FORBIDDEN)
+        if user_type == 'provider' and pr.provider_id != request.user.id:
+            return Response({'error': 'غير مصرح.'}, status=status.HTTP_403_FORBIDDEN)
+
+        return Response(PaymentRequestSerializer(pr).data, status=status.HTTP_200_OK)
