@@ -5,12 +5,10 @@ from .models import (
     Warranty,
     ServiceAttribute,
     Booking,
-    BookingItem,
     ServiceReview,
     ServiceProvider,
     ServiceCompletionForm,
     CompletionMedia,
-    Coupon,
     PreviousWork,
 )
 
@@ -27,11 +25,6 @@ class ServiceAttributeInline(admin.TabularInline):
 
 class ServiceProviderInline(admin.TabularInline):
     model = ServiceProvider
-    extra = 0
-
-
-class BookingItemInline(admin.TabularInline):
-    model = BookingItem
     extra = 0
 
 
@@ -99,14 +92,18 @@ class ServiceAttributeAdmin(admin.ModelAdmin):
     list_display = (
         "name",
         "service",
-        "unit_name",
-        "quantity_name",
-        "unit_cost",
+        "created_at",
+        "updated_at",
     )
     list_filter = ("service",)
     search_fields = (
         "name",
+        "details",
         "service__title",
+    )
+    readonly_fields = (
+        "created_at",
+        "updated_at",
     )
 
 
@@ -123,7 +120,8 @@ class BookingAdmin(admin.ModelAdmin):
         "provider",
         "scheduled_date",
         "status",
-        "final_cost",
+        "price",
+        "priced_at",
     )
     list_filter = (
         "status",
@@ -135,29 +133,9 @@ class BookingAdmin(admin.ModelAdmin):
         "service__title",
     )
     readonly_fields = (
+        "priced_at",
         "created_at",
         "updated_at",
-    )
-
-    inlines = [BookingItemInline]
-
-
-# =======================
-# Booking Item
-# =======================
-
-@admin.register(BookingItem)
-class BookingItemAdmin(admin.ModelAdmin):
-    list_display = (
-        "booking",
-        "attribute",
-        "value",
-        "unit_cost_snapshot",
-        "cost",
-    )
-    search_fields = (
-        "booking__id",
-        "attribute__name",
     )
 
 
@@ -242,31 +220,6 @@ class CompletionMediaAdmin(admin.ModelAdmin):
         "created_at",
     )
     list_filter = ("media_type",)
-
-
-# =======================
-# Coupon
-# =======================
-
-@admin.register(Coupon)
-class CouponAdmin(admin.ModelAdmin):
-    list_display = (
-        "code",
-        "discount_type",
-        "discount_value",
-        "service",
-        "used_count",
-        "is_active",
-        "valid_until",
-    )
-    list_filter = (
-        "discount_type",
-        "is_active",
-    )
-    search_fields = (
-        "code",
-        "service__title",
-    )
 
 
 # =======================

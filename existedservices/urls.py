@@ -8,22 +8,35 @@ from .views import (
     AdminExistedServiceDetailView,
     # Admin - Attributes
     AdminServiceAttributeListView,
-    AdminServiceAttributeDetailView,ProviderBookingStatusView,
+    AdminServiceAttributeDetailView,
+    ProviderBookingStatusView,
     # Client - Bookings
     CustomerBookingListView,
-    CustomerBookingDetailView,ProviderPreviousWorkView,ProviderBookingDetailView,
+    CustomerBookingDetailView,
+    CustomerBookingPriceDecisionView,
+    ProviderPreviousWorkView,
+    ProviderBookingDetailView,
     # Admin - Bookings
     AdminBookingListView,
-    AdminBookingDetailView,ServicePreviousWorksView,
+    AdminBookingDetailView,
+    ServicePreviousWorksView,
     AdminBookingStatusView,
-    ServiceProviderListView,AdminServiceProviderListView,AdminServiceProviderDetailView,ServiceReviewListView,
+    AdminBookingSetPriceView,
+    ServiceProviderListView,
+    AdminServiceProviderListView,
+    AdminServiceProviderDetailView,
+    ServiceReviewListView,
     ServiceRatingSummaryView,
     AdminReviewDeleteView,
-    AdminServiceReviewsClearView,AdminServiceWarrantyView,AdminBookingAssignProviderView,
-    ProviderCompletionFormView,CustomerCompletionFormView,
+    AdminServiceReviewsClearView,
+    AdminServiceWarrantyView,
+    AdminBookingAssignProviderView,
+    ProviderCompletionFormView,
+    CustomerCompletionFormView,
     ProviderCompletionMediaView,
-    CouponValidateView,CustomerConfirmProviderArrivalView,
-    AdminCouponListView,AdminCouponDetailView,AdminAvailableProvidersForServiceView,ProviderCompletionFormListView
+    CustomerConfirmProviderArrivalView,
+    AdminAvailableProvidersForServiceView,
+    ProviderCompletionFormListView,
 )
 
 urlpatterns = [
@@ -43,60 +56,52 @@ urlpatterns = [
     path('bookings/', CustomerBookingListView.as_view(), name='customer-booking-list'),
     path('bookings/<uuid:booking_id>/', CustomerBookingDetailView.as_view(), name='customer-booking-detail'),
     path('bookings/<uuid:booking_id>/cancel/', CustomerBookingDetailView.as_view(), name='customer-booking-cancel'),
+    path('bookings/<uuid:booking_id>/price-decision/', CustomerBookingPriceDecisionView.as_view(), name='customer-booking-price-decision'),
 
-    # ==================== ADMIN - BOOKINGS ====================0
+    # ==================== ADMIN - BOOKINGS ====================
     path('admin/bookings/', AdminBookingListView.as_view(), name='admin-booking-list'),
     path('admin/bookings/<uuid:booking_id>/', AdminBookingDetailView.as_view(), name='admin-booking-detail'),
     path('admin/bookings/<uuid:booking_id>/status/', AdminBookingStatusView.as_view(), name='admin-booking-status'),
-     # Client
-    path('services/<uuid:service_id>/providers/',
-         ServiceProviderListView.as_view()),
- 
+    path('admin/bookings/<uuid:booking_id>/set-price/', AdminBookingSetPriceView.as_view(), name='admin-booking-set-price'),
+    path('admin/bookings/<uuid:booking_id>/assign-provider/', AdminBookingAssignProviderView.as_view(), name='admin-booking-assign-provider'),
+
+    # ==================== SERVICE PROVIDERS ====================
+    # Client
+    path('services/<uuid:service_id>/providers/', ServiceProviderListView.as_view(), name='service-providers'),
+
     # Admin
-    path('admin/services/<uuid:service_id>/providers/',
-         AdminServiceProviderListView.as_view()),
- 
-    path('admin/services/<uuid:service_id>/providers/<uuid:sp_id>/',
-         AdminServiceProviderDetailView.as_view()),
-    path('admin/services/<uuid:service_id>/warranty/', AdminServiceWarrantyView.as_view()),
-    path('services/<uuid:service_id>/reviews/clear/',   AdminServiceReviewsClearView.as_view(),  name='service-reviews-clear'),
-    path('services/<uuid:service_id>/reviews/',         ServiceReviewListView.as_view(),        name='service-reviews'),
-    path('services/<uuid:service_id>/rating/',          ServiceRatingSummaryView.as_view(),      name='service-rating'),
-    path('reviews/<uuid:review_id>/',                   AdminReviewDeleteView.as_view(),         name='service-review-delete'),
+    path('admin/services/<uuid:service_id>/providers/', AdminServiceProviderListView.as_view(), name='admin-service-providers'),
+    path('admin/services/<uuid:service_id>/providers/<uuid:sp_id>/', AdminServiceProviderDetailView.as_view(), name='admin-service-provider-detail'),
+    path('admin/services/<uuid:service_id>/available-providers/', AdminAvailableProvidersForServiceView.as_view(), name='admin-available-providers'),
+
+    # ==================== WARRANTY ====================
+    path('admin/services/<uuid:service_id>/warranty/', AdminServiceWarrantyView.as_view(), name='admin-service-warranty'),
+
+    # ==================== REVIEWS ====================
+    path('services/<uuid:service_id>/reviews/clear/', AdminServiceReviewsClearView.as_view(), name='service-reviews-clear'),
+    path('services/<uuid:service_id>/reviews/', ServiceReviewListView.as_view(), name='service-reviews'),
+    path('services/<uuid:service_id>/rating/', ServiceRatingSummaryView.as_view(), name='service-rating'),
+    path('reviews/<uuid:review_id>/', AdminReviewDeleteView.as_view(), name='service-review-delete'),
+
+    # ==================== COMPLETION FORMS ====================
     # Provider
-     path('provider/completion-forms/<uuid:booking_id>/',
-          ProviderCompletionFormView.as_view()),
+    path('provider/completion-forms/<uuid:booking_id>/', ProviderCompletionFormView.as_view(), name='provider-completion-form'),
+    path('provider/completion-forms/<uuid:booking_id>/media/', ProviderCompletionMediaView.as_view(), name='provider-completion-media'),
+    path('provider/completion-forms/<uuid:booking_id>/media/<uuid:media_id>/', ProviderCompletionMediaView.as_view(), name='provider-completion-media-detail'),
+    path('provider/completion-forms/', ProviderCompletionFormListView.as_view(), name='provider-completion-form-list'),
 
-     path('provider/completion-forms/<uuid:booking_id>/media/',
-          ProviderCompletionMediaView.as_view()),
+    # Client
+    path('bookings/<uuid:booking_id>/completion/', CustomerCompletionFormView.as_view(), name='customer-completion-form'),
+    path('bookings/<uuid:booking_id>/provider-arrived/', CustomerConfirmProviderArrivalView.as_view(), name='customer-confirm-provider-arrival'),
 
-     path('provider/completion-forms/<uuid:booking_id>/media/<uuid:media_id>/',
-          ProviderCompletionMediaView.as_view()),
-     # Client
-     path('coupons/validate/', CouponValidateView.as_view()),
+    # ==================== PREVIOUS WORKS ====================
+    # Client
+    path('services/<uuid:service_id>/previous-works/', ServicePreviousWorksView.as_view(), name='service-previous-works'),
 
-     # Admin
-     path('admin/coupons/',             AdminCouponListView.as_view()),
-     path('admin/coupons/<uuid:coupon_id>/', AdminCouponDetailView.as_view()),
-     path('admin/services/<uuid:service_id>/available-providers/', 
-     AdminAvailableProvidersForServiceView.as_view()),
-     path('admin/bookings/<uuid:booking_id>/assign-provider/', 
-     AdminBookingAssignProviderView.as_view()),
-     # Client
-     path('services/<uuid:service_id>/previous-works/', ServicePreviousWorksView.as_view()),
+    # Provider / Admin
+    path('bookings/<uuid:booking_id>/previous-work/', ProviderPreviousWorkView.as_view(), name='booking-previous-work'),
 
-     # Provider / Admin
-     path('bookings/<uuid:booking_id>/previous-work/', ProviderPreviousWorkView.as_view()),
-     path('provider/bookings/<uuid:booking_id>/', ProviderBookingDetailView.as_view()),
-     path('provider/bookings/<uuid:booking_id>/status/', ProviderBookingStatusView.as_view()),
-     path('provider/completion-forms/', ProviderCompletionFormListView.as_view(), name='provider-completion-form-list'),
-     path('bookings/<uuid:booking_id>/provider-arrived/', CustomerConfirmProviderArrivalView.as_view()),
-
-
-# existedservices/urls.py
-
-path('bookings/<uuid:booking_id>/completion/',
-     CustomerCompletionFormView.as_view(),
-     name='customer-completion-form'),
-    
+    # ==================== PROVIDER - BOOKINGS ====================
+    path('provider/bookings/<uuid:booking_id>/', ProviderBookingDetailView.as_view(), name='provider-booking-detail'),
+    path('provider/bookings/<uuid:booking_id>/status/', ProviderBookingStatusView.as_view(), name='provider-booking-status'),
 ]

@@ -1,10 +1,13 @@
 from rest_framework import serializers
-from .models import ExistedService, ServiceAttribute, Booking, PreviousWork,BookingItem, ServiceReview, ServiceProvider, Specialization, Warranty, ServiceCompletionForm, CompletionMedia
-from accounts.serializers import SpecializationSerializer  # Import SpecializationSerializer
+from .models import (
+    ExistedService, ServiceAttribute, Booking, PreviousWork,
+    ServiceReview, ServiceProvider, Specialization, Warranty,
+    ServiceCompletionForm, CompletionMedia,
+)
+from accounts.serializers import SpecializationSerializer
 from accounts.serializers import CustomerAddressSerializer
 from accounts.models import CustomerAddress
-from .models import Coupon  # Import the Coupon model
-# ==================== ATTRIBUTE SERIALIZERS ====================
+
 # ==================== WARRANTY SERIALIZERS ====================
 
 class WarrantySerializer(serializers.ModelSerializer):
@@ -25,12 +28,15 @@ class WarrantyWriteSerializer(serializers.ModelSerializer):
         if value <= 0:
             raise serializers.ValidationError("Duration value must be greater than 0.")
         return value
-    
+
+
+# ==================== ATTRIBUTE SERIALIZERS (وصفية بس) ====================
+
 class ServiceAttributeSerializer(serializers.ModelSerializer):
     """للكلاينت"""
     class Meta:
         model  = ServiceAttribute
-        fields = ['id', 'name', 'details', 'unit_cost', 'unit_name', 'quantity_name']
+        fields = ['id', 'name', 'details']
         read_only_fields = ['id']
 
 
@@ -38,19 +44,19 @@ class ServiceAttributeAdminSerializer(serializers.ModelSerializer):
     """للأدمن"""
     class Meta:
         model  = ServiceAttribute
-        fields = ['id', 'name', 'details', 'unit_cost', 'unit_name', 'quantity_name', 'created_at', 'updated_at']
+        fields = ['id', 'name', 'details', 'created_at', 'updated_at']
         read_only_fields = ['id', 'created_at', 'updated_at']
 
 
 class ServiceAttributeWriteSerializer(serializers.ModelSerializer):
     class Meta:
         model  = ServiceAttribute
-        fields = ['name', 'details', 'unit_cost', 'unit_name', 'quantity_name']
+        fields = ['name', 'details']
 
-    def validate_unit_cost(self, value):
-        if value <= 0:
-            raise serializers.ValidationError("Unit cost must be greater than 0.")
-        return value
+    def validate_name(self, value):
+        if not value.strip():
+            raise serializers.ValidationError("Name cannot be empty.")
+        return value.strip()
 
 
 # ==================== SERVICE SERIALIZERS ====================
@@ -66,27 +72,28 @@ class ExistedServiceListSerializer(serializers.ModelSerializer):
 class ExistedServiceDetailSerializer(serializers.ModelSerializer):
     """للكلاينت - تفاصيل مع الـ attributes والضمان"""
     attributes = ServiceAttributeSerializer(many=True, read_only=True)
-    warranty   = WarrantySerializer(read_only=True)          # ← أضف السطر ده
+    warranty   = WarrantySerializer(read_only=True)
 
     class Meta:
         model  = ExistedService
-        fields = ['id', 'title', 'image', 'details', 'date', 
-                  'is_active', 'attributes', 'warranty', 'visit_cost']     # ← أضف warranty
+        fields = ['id', 'title', 'image', 'details', 'date',
+                  'is_active', 'attributes', 'warranty', 'visit_cost']
         read_only_fields = ['id']
 
 
 class ExistedServiceAdminListSerializer(serializers.ModelSerializer):
     attributes_count = serializers.IntegerField(source='attributes.count', read_only=True)
     specialization = serializers.PrimaryKeyRelatedField(
-    queryset=Specialization.objects.all(),
-    required=False,
-    allow_null=True
-)  # ← أضف السطر ده
-    warranty   = WarrantySerializer(read_only=True)
+        queryset=Specialization.objects.all(),
+        required=False,
+        allow_null=True
+    )
+    warranty = WarrantySerializer(read_only=True)
+
     class Meta:
         model  = ExistedService
-        fields = ['id', 'title', 'image', 'date', 'is_active', 
-                  'attributes_count', 'specialization',  # ← أضفه هنا
+        fields = ['id', 'title', 'image', 'date', 'is_active',
+                  'attributes_count', 'specialization',
                   'created_at', 'updated_at', 'warranty', 'visit_cost']
         read_only_fields = ['id', 'created_at', 'updated_at']
 
@@ -95,13 +102,16 @@ class ExistedServiceAdminDetailSerializer(serializers.ModelSerializer):
     """للأدمن - تفاصيل كاملة"""
     attributes = ServiceAttributeAdminSerializer(many=True, read_only=True)
     specialization = serializers.PrimaryKeyRelatedField(
-    queryset=Specialization.objects.all(),
-    required=False,
-    allow_null=True
-)
+        queryset=Specialization.objects.all(),
+        required=False,
+        allow_null=True
+    )
+
     class Meta:
         model  = ExistedService
-        fields = ['id', 'title', 'image','specialization', 'details', 'date', 'is_active', 'attributes', 'created_at', 'updated_at', 'warranty', 'visit_cost']
+        fields = ['id', 'title', 'image', 'specialization', 'details', 'date',
+                  'is_active', 'attributes', 'created_at', 'updated_at',
+                  'warranty', 'visit_cost']
         read_only_fields = ['id', 'created_at', 'updated_at']
 
 
@@ -132,7 +142,6 @@ class ExistedServiceWriteSerializer(serializers.ModelSerializer):
         instance.save()
 
         if warranty_data is None:
-            # لو بعت warranty: null → احذف الضمان لو موجود
             if hasattr(instance, 'warranty'):
                 instance.warranty.delete()
         else:
@@ -144,50 +153,35 @@ class ExistedServiceWriteSerializer(serializers.ModelSerializer):
         return instance
 
 
-# ==================== BOOKING ITEM SERIALIZERS ====================
-
-class BookingItemCreateSerializer(serializers.Serializer):
-    attribute_id = serializers.UUIDField()
-    value        = serializers.DecimalField(max_digits=10, decimal_places=2)
-
-    def validate_value(self, value):
-        if value <= 0:
-            raise serializers.ValidationError("Value must be greater than 0.")
-        return value
-
-
-class BookingItemSerializer(serializers.ModelSerializer):
-    attribute_name     = serializers.CharField(source='attribute.name', read_only=True)
-    unit_cost_snapshot = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
-
-    class Meta:
-        model  = BookingItem
-        fields = ['id', 'attribute_name', 'value', 'unit_cost_snapshot', 'cost']
-        read_only_fields = fields
-
-
 # ==================== BOOKING SERIALIZERS - CLIENT ====================
+
 class BookingCreateSerializer(serializers.Serializer):
+    """
+    الحجز دلوقتي بيتعمل بدون كمية وبدون سعر.
+    السعر بيتحدد لاحقاً يدوياً بعد تواصل الدعم الفني مع العميل والفني.
+    """
     service_id     = serializers.UUIDField()
     scheduled_date = serializers.DateField()
     notes          = serializers.CharField(required=False, allow_blank=True, default='')
-    items          = BookingItemCreateSerializer(many=True)
-    coupon_code    = serializers.CharField(required=False, allow_blank=True, default='')  # ← جديد
 
     address_id   = serializers.UUIDField(required=False)
     address_data = CustomerAddressSerializer(required=False)
 
+    def validate_service_id(self, value):
+        if not ExistedService.objects.filter(id=value, is_active=True).exists():
+            raise serializers.ValidationError("Service not found.")
+        return value
+
     def validate(self, attrs):
-        # ... الـ validation الموجود ...
+        if not attrs.get('address_id') and not attrs.get('address_data'):
+            raise serializers.ValidationError("Either address_id or address_data is required.")
         return attrs
 
     def create(self, validated_data):
         customer     = self.context['request'].user
-        items_data   = validated_data.pop('items')
         service      = ExistedService.objects.get(id=validated_data.pop('service_id'))
         address_id   = validated_data.pop('address_id', None)
         address_data = validated_data.pop('address_data', None)
-        coupon_code  = validated_data.pop('coupon_code', '').strip().upper()
 
         if address_data:
             address = CustomerAddress.objects.create(customer=customer, **address_data)
@@ -201,66 +195,33 @@ class BookingCreateSerializer(serializers.Serializer):
             provider=None,
             **validated_data
         )
-
-        for item_data in items_data:
-            attribute = ServiceAttribute.objects.get(id=item_data['attribute_id'])
-            BookingItem.objects.create(
-                booking=booking,
-                attribute=attribute,
-                value=item_data['value'],
-                unit_cost_snapshot=attribute.unit_cost,
-            )
-
-        booking.calculate_total()
-
-        # ── تطبيق الكوبون ──
-        if coupon_code:
-            try:
-                coupon = Coupon.objects.get(code=coupon_code, is_active=True)
-                valid, _ = coupon.is_valid()
-                if valid:
-                    if not coupon.service or coupon.service == service:
-                        if not coupon.min_booking_cost or booking.total_cost >= coupon.min_booking_cost:
-                            discount = coupon.calc_discount(booking.total_cost)
-                            booking.coupon          = coupon
-                            booking.discount_amount = discount
-                            booking.final_cost      = booking.total_cost - discount
-                            booking.save(update_fields=['coupon', 'discount_amount', 'final_cost'])
-                            coupon.used_count += 1
-                            coupon.save(update_fields=['used_count'])
-            except Coupon.DoesNotExist:
-                pass
-        else:
-            booking.final_cost = booking.total_cost
-            booking.save(update_fields=['final_cost'])
-
         return booking
 
+
 class BookingSerializer(serializers.ModelSerializer):
-    items          = BookingItemSerializer(many=True, read_only=True)
     service_title  = serializers.CharField(source='service.title', read_only=True)
-    service_visit_cost = serializers.DecimalField(  # ← جديد
-        source='service.visit_cost', 
-        max_digits=10, decimal_places=2, 
+    service_visit_cost = serializers.DecimalField(
+        source='service.visit_cost',
+        max_digits=10, decimal_places=2,
         read_only=True, allow_null=True
     )
     provider_name  = serializers.CharField(source='provider.name', read_only=True)
     provider_phone = serializers.CharField(source='provider.phone_number', read_only=True)
     address        = CustomerAddressSerializer(read_only=True)
-    coupon_code    = serializers.CharField(source='coupon.code', read_only=True)  # ← جديد
 
     class Meta:
         model  = Booking
         fields = [
             'id', 'service_title', 'address', 'scheduled_date',
-            'notes', 'status', 'total_cost',"service_visit_cost",
-            'coupon_code', 'discount_amount', 'final_cost',   # ← جديد
-            'items', 'created_at', 'provider_name', 'provider_phone'
+            'notes', 'status', 'service_visit_cost',
+            'price', 'priced_at',
+            'created_at', 'provider_name', 'provider_phone'
         ]
         read_only_fields = fields
 
 
 class BookingCancelSerializer(serializers.Serializer):
+    """إلغاء حجز لسه في حالة pending (قبل ما الدعم يبدأ التواصل)"""
     def validate(self, attrs):
         booking = self.context['booking']
         if booking.status != 'pending':
@@ -268,12 +229,31 @@ class BookingCancelSerializer(serializers.Serializer):
         return attrs
 
 
+class BookingPriceDecisionSerializer(serializers.Serializer):
+    """
+    العميل بيوافق أو يرفض السعر المقترح (price_proposed).
+    موافقة → confirmed | رفض → cancelled
+    """
+    accept = serializers.BooleanField()
+
+    def validate(self, attrs):
+        booking = self.context['booking']
+        if booking.status != 'price_proposed':
+            raise serializers.ValidationError("No price is currently awaiting your decision.")
+        return attrs
+
+    def save(self):
+        booking = self.context['booking']
+        booking.status = 'confirmed' if self.validated_data['accept'] else 'cancelled'
+        booking.save(update_fields=['status'])
+        return booking
+
+
 # ==================== BOOKING SERIALIZERS - ADMIN ====================
 
 class BookingAdminSerializer(serializers.ModelSerializer):
-    items          = BookingItemSerializer(many=True, read_only=True)
     service_title  = serializers.CharField(source='service.title', read_only=True)
-    service_visit_cost = serializers.DecimalField(  # ← جديد
+    service_visit_cost = serializers.DecimalField(
         source='service.visit_cost',
         max_digits=10, decimal_places=2,
         read_only=True, allow_null=True
@@ -283,25 +263,30 @@ class BookingAdminSerializer(serializers.ModelSerializer):
     provider_name  = serializers.CharField(source='provider.name', read_only=True)
     provider_phone = serializers.CharField(source='provider.phone_number', read_only=True)
     address = CustomerAddressSerializer(read_only=True)
-    coupon_code    = serializers.CharField(source='coupon.code', read_only=True)
 
     class Meta:
         model  = Booking
         fields = [
-            'id', 'customer_name', 'customer_phone','service_visit_cost',
-            'service_title', 'address', 'scheduled_date','service_id',
-            'notes', 'status', 'total_cost','coupon_code', 'discount_amount', 'final_cost',
-            'items', 'created_at', 'updated_at','provider_name', 'provider_phone'
+            'id', 'customer_name', 'customer_phone', 'service_visit_cost',
+            'service_title', 'address', 'scheduled_date', 'service_id',
+            'notes', 'status', 'price', 'priced_at',
+            'created_at', 'updated_at', 'provider_name', 'provider_phone'
         ]
         read_only_fields = fields
 
 
 class BookingStatusUpdateSerializer(serializers.Serializer):
+    """
+    انتقالات الحالة العامة (بدون سعر). تحويل السعر نفسه بيتم من
+    BookingSetPriceSerializer و BookingPriceDecisionSerializer بس.
+    """
     VALID_TRANSITIONS = {
-        'pending':   ['confirmed', 'cancelled'],
-        'confirmed': ['completed', 'cancelled'],
-        'completed': [],
-        'cancelled': [],
+        'pending':         ['awaiting_price', 'cancelled'],
+        'awaiting_price':  ['cancelled'],
+        'price_proposed':  [],
+        'confirmed':       ['completed', 'cancelled'],
+        'completed':       [],
+        'cancelled':       [],
     }
 
     status = serializers.ChoiceField(choices=Booking.STATUS_CHOICES)
@@ -317,51 +302,83 @@ class BookingStatusUpdateSerializer(serializers.Serializer):
                 f"Allowed: {allowed}"
             )
         return attrs
-    
+
+
+class BookingSetPriceSerializer(serializers.Serializer):
+    """
+    الأدمن بيحط السعر بعد ما يتواصل مع الفني تليفونياً.
+    مسموح بس لو الحجز في awaiting_price.
+    awaiting_price → price_proposed
+    """
+    price = serializers.DecimalField(max_digits=10, decimal_places=2)
+
+    def validate_price(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("Price must be greater than 0.")
+        return value
+
+    def validate(self, attrs):
+        booking = self.context['booking']
+        if booking.status != 'awaiting_price':
+            raise serializers.ValidationError(
+                "You can only set a price for a booking that is awaiting_price."
+            )
+        return attrs
+
+    def save(self):
+        from django.utils import timezone
+        booking = self.context['booking']
+        booking.price     = self.validated_data['price']
+        booking.status    = 'price_proposed'
+        booking.priced_at = timezone.now()
+        booking.save(update_fields=['price', 'status', 'priced_at'])
+        return booking
+
+
+# ==================== REVIEW SERIALIZERS ====================
 
 class ServiceReviewCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model  = ServiceReview
         fields = ['stars', 'comment']
- 
+
     def validate_stars(self, value):
         if not (1 <= value <= 5):
             raise serializers.ValidationError("Stars must be between 1 and 5.")
         return value
- 
+
     def create(self, validated_data):
         service  = self.context['service']
         customer = self.context['request'].user
- 
-        # لو عنده review قديم على نفس الـ service → update
+
         review, _ = ServiceReview.objects.update_or_create(
             service=service,
             customer=customer,
             defaults=validated_data
         )
         return review
- 
- 
+
+
 class ServiceReviewSerializer(serializers.ModelSerializer):
     customer_name = serializers.CharField(source='customer.name', read_only=True)
- 
+
     class Meta:
         model  = ServiceReview
         fields = ['id', 'customer_name', 'stars', 'comment', 'created_at']
         read_only_fields = fields
- 
- 
+
+
 class ServiceRatingSummarySerializer(serializers.Serializer):
-    """متوسط التقييمات وعددهم"""
     service_id    = serializers.UUIDField()
     service_title = serializers.CharField()
     average_stars = serializers.DecimalField(max_digits=3, decimal_places=2)
     total_reviews = serializers.IntegerField()
-    stars_breakdown = serializers.DictField()  # {"5": 10, "4": 5, ...}
+    stars_breakdown = serializers.DictField()
 
+
+# ==================== SERVICE PROVIDER SERIALIZERS ====================
 
 class ServiceProviderSerializer(serializers.ModelSerializer):
-    """للعميل — يشوف الفنيين المتاحين للخدمة"""
     provider_id   = serializers.UUIDField(source='provider.id', read_only=True)
     provider_name = serializers.CharField(source='provider.name', read_only=True)
     provider_phone = serializers.CharField(source='provider.phone_number', read_only=True)
@@ -377,7 +394,7 @@ class ServiceProviderSerializer(serializers.ModelSerializer):
         if spec:
             return {'id': str(spec.id), 'name': spec.name}
         return None
- 
+
     class Meta:
         model  = ServiceProvider
         fields = [
@@ -385,10 +402,9 @@ class ServiceProviderSerializer(serializers.ModelSerializer):
             'specialization', 'average_rating', 'total_reviews', 'is_available'
         ]
         read_only_fields = fields
- 
- 
+
+
 class ServiceProviderAdminSerializer(serializers.ModelSerializer):
-    """للأدمن — تفاصيل أكتر"""
     provider_id    = serializers.UUIDField(source='provider.id', read_only=True)
     provider_name  = serializers.CharField(source='provider.name', read_only=True)
     provider_phone = serializers.CharField(source='provider.phone_number', read_only=True)
@@ -397,7 +413,7 @@ class ServiceProviderAdminSerializer(serializers.ModelSerializer):
         source='provider.average_rating',
         max_digits=3, decimal_places=2, read_only=True
     )
- 
+
     class Meta:
         model  = ServiceProvider
         fields = [
@@ -405,37 +421,36 @@ class ServiceProviderAdminSerializer(serializers.ModelSerializer):
             'is_approved', 'average_rating', 'is_available', 'created_at'
         ]
         read_only_fields = fields
- 
- 
+
+
 class AssignProviderSerializer(serializers.Serializer):
-    """الأدمن يضيف فني للخدمة"""
     provider_id = serializers.UUIDField()
- 
+
     def validate_provider_id(self, value):
         from accounts.models import Provider
         try:
-            provider = Provider.objects.get(id=value, is_approved=True, is_active=True)
+            Provider.objects.get(id=value, is_approved=True, is_active=True)
         except Provider.DoesNotExist:
             raise serializers.ValidationError("Provider not found or not approved.")
         return value
- 
+
     def validate(self, attrs):
         service     = self.context['service']
         provider_id = attrs['provider_id']
- 
+
         if ServiceProvider.objects.filter(
             service=service, provider_id=provider_id
         ).exists():
             raise serializers.ValidationError("This provider is already assigned to this service.")
         return attrs
- 
+
     def create(self, validated_data):
         service = self.context['service']
         return ServiceProvider.objects.create(
             service=service,
             provider_id=validated_data['provider_id']
         )
-    
+
 
 # ==================== COMPLETION FORM SERIALIZERS ====================
 
@@ -453,18 +468,16 @@ class CompletionMediaWriteSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         if attrs.get('media_type') == 'video' and not attrs.get('thumbnail_url'):
-            raise serializers.ValidationError(
-                "thumbnail_url is required for videos."
-            )
+            raise serializers.ValidationError("thumbnail_url is required for videos.")
         return attrs
 
+
 class ServiceCompletionFormSerializer(serializers.ModelSerializer):
-    """للعرض — فني وأدمن وعميل"""
     media               = CompletionMediaSerializer(many=True, read_only=True)
     booking_id          = serializers.UUIDField(source='booking.id', read_only=True)
     previous_work       = serializers.SerializerMethodField()
-    payment_request_id  = serializers.SerializerMethodField()  # ← جديد
-    payment_status      = serializers.SerializerMethodField()  # ← جديد
+    payment_request_id  = serializers.SerializerMethodField()
+    payment_status      = serializers.SerializerMethodField()
 
     class Meta:
         model  = ServiceCompletionForm
@@ -473,7 +486,7 @@ class ServiceCompletionFormSerializer(serializers.ModelSerializer):
             'status', 'started_at',
             'is_finished', 'finished_at',
             'media', 'previous_work',
-            'payment_request_id', 'payment_status',   # ← جديد
+            'payment_request_id', 'payment_status',
             'created_at', 'updated_at'
         ]
         read_only_fields = fields
@@ -486,11 +499,6 @@ class ServiceCompletionFormSerializer(serializers.ModelSerializer):
         return PreviousWorkSerializer(work).data
 
     def get_payment_request_id(self, obj):
-        """
-        بترجع None تلقائيًا للبوكينج العادي (existedservices) لأنه أصلاً
-        مفيش PaymentRequest بيتعمل ليه — النظام المالي بيطبق بس على
-        الطلبات المخصصة (custom_request مش None).
-        """
         payment_request = getattr(obj, 'payment_request', None)
         return str(payment_request.id) if payment_request else None
 
@@ -498,23 +506,20 @@ class ServiceCompletionFormSerializer(serializers.ModelSerializer):
         payment_request = getattr(obj, 'payment_request', None)
         return payment_request.status if payment_request else None
 
+
 class ServiceCompletionFormUpdateSerializer(serializers.ModelSerializer):
-    """الفني يضيف ملاحظات ويعمل finish"""
     class Meta:
         model  = ServiceCompletionForm
         fields = ['notes', 'is_finished']
 
     def validate(self, attrs):
-        form = self.instance  # موجود دايماً لأنها PATCH
+        form = self.instance
         if form.is_finished:
-            raise serializers.ValidationError(
-                "This completion form is already finished."
-            )
+            raise serializers.ValidationError("This completion form is already finished.")
         return attrs
 
     def update(self, instance, validated_data):
         is_finishing = validated_data.get('is_finished', False)
-
         instance.notes = validated_data.get('notes', instance.notes)
 
         if is_finishing:
@@ -524,120 +529,11 @@ class ServiceCompletionFormUpdateSerializer(serializers.ModelSerializer):
 
         instance.save()
         return instance
-    
-# ==================== COUPON SERIALIZERS ====================
-
-class CouponSerializer(serializers.ModelSerializer):
-    """للعميل — بعد ما يتحقق من الكوبون"""
-    class Meta:
-        model  = Coupon
-        fields = [
-            'id', 'code', 'discount_type', 'discount_value',
-            'max_discount', 'min_booking_cost', 'valid_until'
-        ]
-        read_only_fields = fields
 
 
-class CouponAdminSerializer(serializers.ModelSerializer):
-    """للأدمن — كل التفاصيل"""
-    service_title = serializers.CharField(source='service.title', read_only=True)
-    usage_left    = serializers.SerializerMethodField()
-
-    def get_usage_left(self, obj):
-        if obj.max_uses is None:
-            return None   # غير محدود
-        return max(0, obj.max_uses - obj.used_count)
-
-    class Meta:
-        model  = Coupon
-        fields = [
-            'id', 'code', 'discount_type', 'discount_value',
-            'max_discount', 'min_booking_cost',
-            'valid_from', 'valid_until',
-            'max_uses', 'used_count', 'usage_left',
-            'service', 'service_title',
-            'is_active', 'created_at'
-        ]
-        read_only_fields = ['id', 'used_count', 'created_at', 'service_title', 'usage_left']
-
-
-class CouponWriteSerializer(serializers.ModelSerializer):
-    class Meta:
-        model  = Coupon
-        fields = [
-            'code', 'discount_type', 'discount_value',
-            'max_discount', 'min_booking_cost',
-            'valid_from', 'valid_until',
-            'max_uses', 'service', 'is_active'
-        ]
-
-    def validate_code(self, value):
-        value = value.strip().upper()
-        qs = Coupon.objects.filter(code=value)
-        if self.instance:
-            qs = qs.exclude(pk=self.instance.pk)
-        if qs.exists():
-            raise serializers.ValidationError("هذا الكود مستخدم بالفعل.")
-        return value
-
-    def validate_discount_value(self, value):
-        if value <= 0:
-            raise serializers.ValidationError("قيمة الخصم يجب أن تكون أكبر من 0.")
-        return value
-
-    def validate(self, attrs):
-        discount_type  = attrs.get('discount_type')
-        discount_value = attrs.get('discount_value', 0)
-
-        if discount_type == 'percentage' and discount_value > 100:
-            raise serializers.ValidationError(
-                "نسبة الخصم لا يمكن أن تتجاوز 100%."
-            )
-        if attrs.get('valid_from') and attrs.get('valid_until'):
-            if attrs['valid_from'] >= attrs['valid_until']:
-                raise serializers.ValidationError(
-                    "تاريخ الانتهاء يجب أن يكون بعد تاريخ البداية."
-                )
-        return attrs
-
-
-class CouponValidateSerializer(serializers.Serializer):
-    """العميل يتحقق من كوبون قبل الحجز"""
-    code       = serializers.CharField(max_length=50)
-    service_id = serializers.UUIDField()
-    total_cost = serializers.DecimalField(max_digits=10, decimal_places=2)
-
-    def validate(self, attrs):
-        code = attrs['code'].strip().upper()
-        service_id = attrs['service_id']
-        total_cost = attrs['total_cost']
-
-        try:
-            coupon = Coupon.objects.get(code=code, is_active=True)
-        except Coupon.DoesNotExist:
-            raise serializers.ValidationError("الكوبون غير صحيح.")
-
-        valid, error = coupon.is_valid()
-        if not valid:
-            raise serializers.ValidationError(error)
-
-        # لو الكوبون مخصص لخدمة معينة
-        if coupon.service and str(coupon.service.id) != str(service_id):
-            raise serializers.ValidationError("هذا الكوبون غير صالح لهذه الخدمة.")
-
-        # حد أدنى لقيمة الحجز
-        if coupon.min_booking_cost and total_cost < coupon.min_booking_cost:
-            raise serializers.ValidationError(
-                f"الحد الأدنى لاستخدام هذا الكوبون هو "
-                f"{coupon.min_booking_cost} ر.س."
-            )
-
-        attrs['coupon'] = coupon
-        return attrs
-    
+# ==================== PREVIOUS WORK SERIALIZERS ====================
 
 class PreviousWorkSerializer(serializers.ModelSerializer):
-    """للعميل — يشوف الأعمال السابقة"""
     class Meta:
         model  = PreviousWork
         fields = ['id', 'before_image', 'after_image', 'created_at']
@@ -674,23 +570,25 @@ class PreviousWorkWriteSerializer(serializers.ModelSerializer):
             **validated_data
         )
 
-class ProviderCompletionFormListItemSerializer(serializers.Serializer):
-    attribute_id   = serializers.CharField(source='attribute.id')
-    attribute_name = serializers.CharField(source='attribute.name')
-    unit_name      = serializers.CharField(source='attribute.unit_name')
-    quantity_name  = serializers.CharField(source='attribute.quantity_name')
-    value          = serializers.DecimalField(max_digits=10, decimal_places=2)
+
+# ==================== PROVIDER COMPLETION FORM LIST ====================
+
+class ServiceAttributeInlineSerializer(serializers.Serializer):
+    """وصف مواصفات الخدمة (بدون كمية) — بيظهر للفني كمرجع وقت التسعير/التنفيذ"""
+    name    = serializers.CharField()
+    details = serializers.CharField()
 
 
 class ProviderCompletionFormListSerializer(serializers.Serializer):
-    id          = serializers.UUIDField()
-    booking_id  = serializers.SerializerMethodField()
-    service_title = serializers.SerializerMethodField()
-    customer_address = serializers.SerializerMethodField()
-    is_finished = serializers.BooleanField()
-    finished_at = serializers.DateTimeField()
-    created_at  = serializers.DateTimeField()
-    items       = serializers.SerializerMethodField()
+    id                = serializers.UUIDField()
+    booking_id        = serializers.SerializerMethodField()
+    service_title     = serializers.SerializerMethodField()
+    customer_address  = serializers.SerializerMethodField()
+    price             = serializers.SerializerMethodField()
+    is_finished       = serializers.BooleanField()
+    finished_at       = serializers.DateTimeField()
+    created_at        = serializers.DateTimeField()
+    service_attributes = serializers.SerializerMethodField()
 
     def get_booking_id(self, obj):
         return str(obj.booking_id) if obj.booking_id else None
@@ -699,6 +597,9 @@ class ProviderCompletionFormListSerializer(serializers.Serializer):
         if obj.booking and obj.booking.service:
             return obj.booking.service.title
         return None
+
+    def get_price(self, obj):
+        return obj.booking.price if obj.booking else None
 
     def get_customer_address(self, obj):
         address = obj.booking.address if obj.booking else None
@@ -719,8 +620,8 @@ class ProviderCompletionFormListSerializer(serializers.Serializer):
             'lng': str(address.lng) if address.lng is not None else None,
         }
 
-    def get_items(self, obj):
-        if not obj.booking:
+    def get_service_attributes(self, obj):
+        if not obj.booking or not obj.booking.service:
             return []
-        items = obj.booking.items.select_related('attribute').all()
-        return ProviderCompletionFormListItemSerializer(items, many=True).data
+        attributes = obj.booking.service.attributes.all()
+        return ServiceAttributeInlineSerializer(attributes, many=True).data

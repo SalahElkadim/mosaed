@@ -2,16 +2,30 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAdminUser
-from accounts.permissions import IsCustomer,IsProviderOrAdmin   
-from .models import ExistedService, ServiceAttribute, PreviousWork,Booking, ServiceReview, ServiceProvider, Warranty
+from accounts.permissions import IsCustomer, IsProviderOrAdmin, IsProvider
+from django.utils import timezone
+from django.db.models import Avg, Count
+import base64
+import uuid as uuid_lib
+from django.core.files.base import ContentFile
+
+from .models import (
+    ExistedService, ServiceAttribute, PreviousWork, Booking,
+    ServiceReview, ServiceProvider, Warranty,
+    ServiceCompletionForm, CompletionMedia,
+)
 from utils.cloudinary import upload_image, upload_video
 from .serializers import (
     # Service
     ExistedServiceListSerializer,
     ExistedServiceDetailSerializer,
-    ExistedServiceAdminListSerializer,PreviousWorkSerializer,
+    ExistedServiceAdminListSerializer,
+    PreviousWorkSerializer,
     ExistedServiceAdminDetailSerializer,
-    ExistedServiceWriteSerializer,WarrantyWriteSerializer,PreviousWorkWriteSerializer,ProviderCompletionFormListSerializer,
+    ExistedServiceWriteSerializer,
+    WarrantyWriteSerializer,
+    PreviousWorkWriteSerializer,
+    ProviderCompletionFormListSerializer,
     # Attribute
     ServiceAttributeAdminSerializer,
     ServiceAttributeWriteSerializer,
@@ -20,20 +34,23 @@ from .serializers import (
     BookingSerializer,
     BookingCancelSerializer,
     BookingAdminSerializer,
-    BookingStatusUpdateSerializer,ServiceReviewCreateSerializer,
-    ServiceReviewSerializer, ServiceRatingSummarySerializer,
-    ServiceProviderAdminSerializer,  # Added missing import
-    AssignProviderSerializer,  # Added missing import
-    ServiceProviderSerializer, ServiceCompletionFormSerializer,
+    BookingStatusUpdateSerializer,
+    BookingSetPriceSerializer,
+    BookingPriceDecisionSerializer,
+    # Reviews
+    ServiceReviewCreateSerializer,
+    ServiceReviewSerializer,
+    ServiceRatingSummarySerializer,
+    # Providers
+    ServiceProviderAdminSerializer,
+    AssignProviderSerializer,
+    ServiceProviderSerializer,
+    # Completion form
+    ServiceCompletionFormSerializer,
     ServiceCompletionFormUpdateSerializer,
-    CompletionMediaWriteSerializer, CompletionMediaSerializer, # Added missing import
+    CompletionMediaWriteSerializer,
+    CompletionMediaSerializer,
 )
-from .models import ServiceCompletionForm, CompletionMedia
-
-from django.db.models import Avg, Count
-import base64
-import uuid as uuid_lib
-from django.core.files.base import ContentFile
 
 
 def _resolve_image_field(request, field_name, folder):
@@ -52,7 +69,7 @@ def _resolve_image_field(request, field_name, folder):
         return None
 
     if raw_value.startswith('http'):
-        return raw_value  # URL جاهز
+        return raw_value
 
     file_obj = _decode_base64_file(raw_value, default_ext='jpg')
     return upload_image(file_obj, folder=folder)
@@ -99,6 +116,8 @@ def _resolve_media_upload(request, field_name, media_type, folder):
         return result['url'], result['thumbnail']
     else:
         return upload_image(file_obj, folder=folder), None
+
+
 # ==================== CLIENT - SERVICE VIEWS ====================
 
 class ExistedServiceListView(APIView):
@@ -128,7 +147,7 @@ class AdminExistedServiceListView(APIView):
 
     def get(self, request):
         is_active = request.query_params.get('is_active')
-        services  = ExistedService.objects.all()
+        services = ExistedService.objects.all()
 
         if is_active == 'true':
             services = services.filter(is_active=True)
@@ -141,10 +160,7 @@ class AdminExistedServiceListView(APIView):
         data = request.data.copy()
 
         if 'image' in request.FILES:
-            data['image'] = upload_image(
-                request.FILES['image'],
-                folder="services"
-            )
+            data['image'] = upload_image(request.FILES['image'], folder="services")
 
         serializer = ExistedServiceWriteSerializer(data=data)
         serializer.is_valid(raise_exception=True)
@@ -178,10 +194,7 @@ class AdminExistedServiceDetailView(APIView):
         data = request.data.copy()
 
         if 'image' in request.FILES:
-            data['image'] = upload_image(
-                request.FILES['image'],
-                folder="services"
-            )
+            data['image'] = upload_image(request.FILES['image'], folder="services")
 
         serializer = ExistedServiceWriteSerializer(service, data=data, partial=True)
         serializer.is_valid(raise_exception=True)
@@ -196,7 +209,7 @@ class AdminExistedServiceDetailView(APIView):
         return Response({'message': 'Service deleted successfully.'}, status=status.HTTP_200_OK)
 
 
-# ==================== ADMIN - ATTRIBUTE VIEWS ====================
+# ==================== ADMIN - ATTRIBUTE VIEWS (وصفية بس) ====================
 
 class AdminServiceAttributeListView(APIView):
     permission_classes = [IsAdminUser]
@@ -261,12 +274,16 @@ class CustomerBookingListView(APIView):
         status_filter = request.query_params.get('status')
         bookings = Booking.objects.filter(customer=request.user)
 
-        if status_filter in ('pending', 'confirmed', 'completed', 'cancelled'):
+        if status_filter in dict(Booking.STATUS_CHOICES):
             bookings = bookings.filter(status=status_filter)
 
         return Response(BookingSerializer(bookings, many=True).data)
 
     def post(self, request):
+        """
+        الحجز بيتعمل بدون كمية وبدون سعر — بيبدأ بحالة pending.
+        الدعم الفني هو اللي هيتواصل مع العميل والفني ويحدد السعر بعد كدا.
+        """
         serializer = BookingCreateSerializer(data=request.data, context={'request': request})
         serializer.is_valid(raise_exception=True)
         booking = serializer.save()
@@ -289,7 +306,7 @@ class CustomerBookingDetailView(APIView):
         return Response(BookingSerializer(booking).data)
 
     def post(self, request, booking_id):
-        """إلغاء الحجز"""
+        """إلغاء الحجز — متاح بس لو لسه pending (قبل ما الدعم يبدأ التواصل)"""
         booking = self.get_object(request, booking_id)
         if not booking:
             return Response({'error': 'Booking not found.'}, status=status.HTTP_404_NOT_FOUND)
@@ -302,37 +319,59 @@ class CustomerBookingDetailView(APIView):
         return Response(BookingSerializer(booking).data)
 
 
+class CustomerBookingPriceDecisionView(APIView):
+    """
+    POST /bookings/<booking_id>/price-decision/
+    العميل بيوافق أو يرفض على السعر المقترح (price_proposed).
+    body: {"accept": true|false}
+    موافقة → confirmed | رفض → cancelled
+    """
+    permission_classes = [IsCustomer]
+
+    def post(self, request, booking_id):
+        try:
+            booking = Booking.objects.get(id=booking_id, customer=request.user)
+        except Booking.DoesNotExist:
+            return Response({'error': 'Booking not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = BookingPriceDecisionSerializer(
+            data=request.data, context={'booking': booking}
+        )
+        serializer.is_valid(raise_exception=True)
+        booking = serializer.save()
+        return Response(BookingSerializer(booking).data, status=status.HTTP_200_OK)
+
+
 # ==================== ADMIN - BOOKING VIEWS ====================
 
 class AdminBookingListView(APIView):
     permission_classes = [IsAdminUser]
 
     def get(self, request):
-        status_filter   = request.query_params.get('status')
-        service_filter  = request.query_params.get('service_id')
-        customer_filter = request.query_params.get('customer_id')  # ← جديد
+        status_filter = request.query_params.get('status')
+        service_filter = request.query_params.get('service_id')
+        customer_filter = request.query_params.get('customer_id')
 
-        bookings = Booking.objects.select_related(
-            'customer', 'service'
-        ).prefetch_related('items__attribute')
+        bookings = Booking.objects.select_related('customer', 'service', 'provider', 'address')
 
-        if status_filter in ('pending', 'confirmed', 'completed', 'cancelled'):
+        if status_filter in dict(Booking.STATUS_CHOICES):
             bookings = bookings.filter(status=status_filter)
         if service_filter:
             bookings = bookings.filter(service_id=service_filter)
-        if customer_filter:                                         # ← جديد
+        if customer_filter:
             bookings = bookings.filter(customer_id=customer_filter)
 
         return Response(BookingAdminSerializer(bookings, many=True).data)
-    
+
+
 class AdminBookingDetailView(APIView):
     permission_classes = [IsProviderOrAdmin]
 
     def get_object(self, booking_id):
         try:
             return Booking.objects.select_related(
-                'customer', 'service'
-            ).prefetch_related('items__attribute').get(id=booking_id)
+                'customer', 'service', 'provider', 'address'
+            ).get(id=booking_id)
         except Booking.DoesNotExist:
             return None
 
@@ -344,6 +383,11 @@ class AdminBookingDetailView(APIView):
 
 
 class AdminBookingStatusView(APIView):
+    """
+    انتقالات الحالة العامة اللي مالهاش علاقة بالسعر
+    (pending→awaiting_price، confirmed→completed، والإلغاء).
+    تحديد السعر نفسه بيتم من AdminBookingSetPriceView.
+    """
     permission_classes = [IsAdminUser]
 
     def post(self, request, booking_id):
@@ -360,37 +404,125 @@ class AdminBookingStatusView(APIView):
         booking.status = serializer.validated_data['status']
         booking.save(update_fields=['status'])
         return Response(BookingAdminSerializer(booking).data)
-    
+
+
+class AdminBookingSetPriceView(APIView):
+    """
+    POST /admin/bookings/<booking_id>/set-price/
+    الأدمن بيحط السعر بعد ما ياخده تليفونياً من الفني.
+    متاح بس لو الحجز في awaiting_price.
+    awaiting_price → price_proposed
+    """
+    permission_classes = [IsAdminUser]
+
+    def post(self, request, booking_id):
+        try:
+            booking = Booking.objects.get(id=booking_id)
+        except Booking.DoesNotExist:
+            return Response({'error': 'Booking not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = BookingSetPriceSerializer(
+            data=request.data, context={'booking': booking}
+        )
+        serializer.is_valid(raise_exception=True)
+        booking = serializer.save()
+        return Response(BookingAdminSerializer(booking).data, status=status.HTTP_200_OK)
+
+
+class AdminBookingAssignProviderView(APIView):
+    permission_classes = [IsAdminUser]
+
+    def patch(self, request, booking_id):
+        try:
+            booking = Booking.objects.get(id=booking_id)
+        except Booking.DoesNotExist:
+            return Response({'error': 'Booking not found.'}, status=404)
+
+        provider_id = request.data.get('provider_id')
+        if not provider_id:
+            return Response({'error': 'provider_id is required.'}, status=400)
+
+        from accounts.models import Provider
+        try:
+            provider = Provider.objects.get(id=provider_id, is_active=True, is_approved=True)
+        except Provider.DoesNotExist:
+            return Response({'error': 'Provider not found.'}, status=404)
+
+        booking.provider = provider
+        booking.save(update_fields=['provider'])
+        return Response(BookingAdminSerializer(booking).data)
+
+
+class AdminAvailableProvidersForServiceView(APIView):
+    """
+    GET /admin/services/<service_id>/available-providers/
+    يجيب الفنيين اللي عندهم نفس تخصص الخدمة ومش متعينين فيها
+    """
+    permission_classes = [IsAdminUser]
+
+    def get(self, request, service_id):
+        try:
+            service = ExistedService.objects.get(id=service_id)
+        except ExistedService.DoesNotExist:
+            return Response({'error': 'Service not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        assigned_ids = ServiceProvider.objects.filter(
+            service=service
+        ).values_list('provider_id', flat=True)
+
+        from accounts.models import Provider
+        providers = Provider.objects.filter(
+            is_active=True,
+            is_approved=True,
+        ).exclude(id__in=assigned_ids)
+
+        if service.specialization:
+            providers = providers.filter(specialization=service.specialization)
+
+        data = [
+            {
+                'id': str(p.id),
+                'name': p.name,
+                'phone_number': p.phone_number,
+                'specialization': p.specialization.name if p.specialization else None,
+            }
+            for p in providers
+        ]
+        return Response(data)
+
+
+# ==================== REVIEW VIEWS ====================
+
 class ServiceReviewListView(APIView):
     """
     GET  → عرض كل التقييمات لخدمة معينة (public)
     POST → إضافة/تعديل تقييم (customer فقط)
     """
- 
+
     def get_permissions(self):
         if self.request.method == 'POST':
             return [IsCustomer()]
         return [AllowAny()]
- 
+
     def get_service(self, service_id):
         try:
             return ExistedService.objects.get(id=service_id, is_active=True)
         except ExistedService.DoesNotExist:
             return None
- 
+
     def get(self, request, service_id):
         service = self.get_service(service_id)
         if not service:
             return Response({'error': 'Service not found.'}, status=status.HTTP_404_NOT_FOUND)
- 
+
         reviews = service.reviews.select_related('customer').all()
         return Response(ServiceReviewSerializer(reviews, many=True).data)
- 
+
     def post(self, request, service_id):
         service = self.get_service(service_id)
         if not service:
             return Response({'error': 'Service not found.'}, status=status.HTTP_404_NOT_FOUND)
- 
+
         serializer = ServiceReviewCreateSerializer(
             data=request.data,
             context={'request': request, 'service': service}
@@ -398,151 +530,110 @@ class ServiceReviewListView(APIView):
         serializer.is_valid(raise_exception=True)
         review = serializer.save()
         return Response(ServiceReviewSerializer(review).data, status=status.HTTP_201_CREATED)
- 
- 
+
+
 class ServiceRatingSummaryView(APIView):
-    """
-    GET /services/<service_id>/rating/
-    يرجع متوسط النجوم + توزيع التقييمات
-    """
     permission_classes = [AllowAny]
- 
+
     def get(self, request, service_id):
         try:
             service = ExistedService.objects.get(id=service_id, is_active=True)
         except ExistedService.DoesNotExist:
             return Response({'error': 'Service not found.'}, status=status.HTTP_404_NOT_FOUND)
- 
+
         reviews = service.reviews.all()
- 
+
         aggregate = reviews.aggregate(
             average_stars=Avg('stars'),
             total_reviews=Count('id')
         )
- 
-        # توزيع النجوم 1 → 5
+
         breakdown = {}
         for i in range(1, 6):
             breakdown[str(i)] = reviews.filter(stars=i).count()
- 
+
         data = {
-            'service_id':    str(service.id),
+            'service_id': str(service.id),
             'service_title': service.title,
             'average_stars': round(aggregate['average_stars'] or 0, 2),
             'total_reviews': aggregate['total_reviews'],
             'stars_breakdown': breakdown,
         }
         return Response(data, status=status.HTTP_200_OK)
- 
- 
+
+
 class AdminReviewDeleteView(APIView):
-    """
-    DELETE /reviews/<review_id>/
-    حذف تقييم واحد (admin فقط)
-    """
     permission_classes = [IsAdminUser]
- 
+
     def delete(self, request, review_id):
         try:
             review = ServiceReview.objects.get(id=review_id)
         except ServiceReview.DoesNotExist:
             return Response({'error': 'Review not found.'}, status=status.HTTP_404_NOT_FOUND)
- 
+
         review.delete()
         return Response({'message': 'Review deleted successfully.'}, status=status.HTTP_200_OK)
- 
- 
+
+
 class AdminServiceReviewsClearView(APIView):
-    """
-    DELETE /services/<service_id>/reviews/clear/
-    حذف كل تقييمات خدمة معينة (admin فقط)
-    """
     permission_classes = [IsAdminUser]
- 
+
     def delete(self, request, service_id):
         try:
             service = ExistedService.objects.get(id=service_id)
         except ExistedService.DoesNotExist:
             return Response({'error': 'Service not found.'}, status=status.HTTP_404_NOT_FOUND)
- 
+
         deleted_count, _ = service.reviews.all().delete()
         return Response(
             {'message': f'{deleted_count} review(s) deleted successfully.'},
             status=status.HTTP_200_OK
         )
-    
 
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-from rest_framework.permissions import AllowAny, IsAdminUser
-# from accounts.permissions import IsCustomer
-# from .models import ExistedService, ServiceProvider
-# from .serializers import (
-#     ServiceProviderSerializer,
-#     ServiceProviderAdminSerializer,
-#     AssignProviderSerializer,
-# )
- 
- 
-# ----------------------------------------------------------
-# Endpoints الجديدة:
-#
-# GET  /services/<id>/providers/              → الفنيين المتاحين للعميل (public)
-# GET  /admin/services/<id>/providers/        → كل الفنيين للأدمن
-# POST /admin/services/<id>/providers/        → إضافة فني للخدمة (admin)
-# PATCH/DELETE /admin/services/<id>/providers/<sp_id>/  → تعديل أو حذف (admin)
-# ----------------------------------------------------------
- 
- 
+
+# ==================== SERVICE PROVIDER VIEWS ====================
+
 class ServiceProviderListView(APIView):
-    """
-    GET /services/<service_id>/providers/
-    للعميل — يشوف الفنيين المتاحين قبل الحجز
-    """
+    """GET /services/<service_id>/providers/ — للعميل، يشوف الفنيين المتاحين"""
     permission_classes = [AllowAny]
- 
+
     def get(self, request, service_id):
         try:
             service = ExistedService.objects.get(id=service_id, is_active=True)
         except ExistedService.DoesNotExist:
             return Response({'error': 'Service not found.'}, status=status.HTTP_404_NOT_FOUND)
- 
+
         providers = service.service_providers.filter(
             is_available=True,
             provider__is_active=True,
             provider__is_approved=True
         ).select_related('provider')
- 
+
         return Response(ServiceProviderSerializer(providers, many=True).data)
- 
- 
+
+
 class AdminServiceProviderListView(APIView):
-    """
-    GET  /admin/services/<service_id>/providers/  → كل الفنيين (بغض النظر عن availability)
-    POST /admin/services/<service_id>/providers/  → إضافة فني
-    """
     permission_classes = [IsAdminUser]
- 
+
     def get_service(self, service_id):
         try:
             return ExistedService.objects.get(id=service_id)
         except ExistedService.DoesNotExist:
             return None
- 
+
     def get(self, request, service_id):
         service = self.get_service(service_id)
         if not service:
             return Response({'error': 'Service not found.'}, status=status.HTTP_404_NOT_FOUND)
- 
+
         providers = service.service_providers.select_related('provider').all()
         return Response(ServiceProviderAdminSerializer(providers, many=True).data)
- 
+
     def post(self, request, service_id):
         service = self.get_service(service_id)
         if not service:
             return Response({'error': 'Service not found.'}, status=status.HTTP_404_NOT_FOUND)
- 
+
         serializer = AssignProviderSerializer(
             data=request.data,
             context={'service': service}
@@ -553,26 +644,22 @@ class AdminServiceProviderListView(APIView):
             ServiceProviderAdminSerializer(sp).data,
             status=status.HTTP_201_CREATED
         )
- 
- 
+
+
 class AdminServiceProviderDetailView(APIView):
-    """
-    PATCH  /admin/services/<service_id>/providers/<sp_id>/  → تغيير is_available
-    DELETE /admin/services/<service_id>/providers/<sp_id>/  → إزالة الفني من الخدمة
-    """
     permission_classes = [IsAdminUser]
- 
+
     def get_object(self, service_id, sp_id):
         try:
             return ServiceProvider.objects.get(id=sp_id, service_id=service_id)
         except ServiceProvider.DoesNotExist:
             return None
- 
+
     def patch(self, request, service_id, sp_id):
         sp = self.get_object(service_id, sp_id)
         if not sp:
             return Response({'error': 'Assignment not found.'}, status=status.HTTP_404_NOT_FOUND)
- 
+
         is_available = request.data.get('is_available')
         if is_available is None:
             return Response(
@@ -584,11 +671,11 @@ class AdminServiceProviderDetailView(APIView):
                 {'error': 'is_available must be true or false.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
- 
+
         sp.is_available = is_available
         sp.save(update_fields=['is_available'])
         return Response(ServiceProviderAdminSerializer(sp).data)
- 
+
     def delete(self, request, service_id, sp_id):
         sp = self.get_object(service_id, sp_id)
         if not sp:
@@ -598,16 +685,11 @@ class AdminServiceProviderDetailView(APIView):
             {'message': 'Provider removed from service successfully.'},
             status=status.HTTP_200_OK
         )
- 
+
+
 # ==================== ADMIN - WARRANTY VIEWS ====================
 
 class AdminServiceWarrantyView(APIView):
-    """
-    GET    /admin/services/<service_id>/warranty/  → عرض الضمان
-    POST   /admin/services/<service_id>/warranty/  → إنشاء ضمان
-    PATCH  /admin/services/<service_id>/warranty/  → تعديل الضمان
-    DELETE /admin/services/<service_id>/warranty/  → حذف الضمان
-    """
     permission_classes = [IsAdminUser]
 
     def get_service(self, service_id):
@@ -633,7 +715,6 @@ class AdminServiceWarrantyView(APIView):
         if not service:
             return Response({'error': 'Service not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        # الخدمة عندها ضمان بالفعل؟
         if hasattr(service, 'warranty'):
             return Response(
                 {'error': 'Warranty already exists. Use PATCH to update.'},
@@ -672,7 +753,9 @@ class AdminServiceWarrantyView(APIView):
 
         warranty.delete()
         return Response({'message': 'Warranty deleted successfully.'}, status=status.HTTP_200_OK)
-    
+
+
+# ==================== COMPLETION FORM VIEWS ====================
 
 class ProviderCompletionFormView(APIView):
     permission_classes = [IsProviderOrAdmin]
@@ -681,10 +764,8 @@ class ProviderCompletionFormView(APIView):
         user_type = getattr(request.auth, 'payload', {}).get('user_type')
         try:
             if user_type == 'admin':
-                # الأدمن يشوف أي نموذج
                 return ServiceCompletionForm.objects.get(booking__id=booking_id)
             else:
-                # الفني بتاع الحجز بس
                 return ServiceCompletionForm.objects.get(
                     booking__id=booking_id,
                     booking__provider=request.user
@@ -695,19 +776,13 @@ class ProviderCompletionFormView(APIView):
     def get(self, request, booking_id):
         form = self.get_object(request, booking_id)
         if not form:
-            return Response(
-                {'error': 'Completion form not found.'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            return Response({'error': 'Completion form not found.'}, status=status.HTTP_404_NOT_FOUND)
         return Response(ServiceCompletionFormSerializer(form).data)
 
     def patch(self, request, booking_id):
         form = self.get_object(request, booking_id)
         if not form:
-            return Response(
-                {'error': 'Completion form not found.'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            return Response({'error': 'Completion form not found.'}, status=status.HTTP_404_NOT_FOUND)
         serializer = ServiceCompletionFormUpdateSerializer(
             form, data=request.data, partial=True
         )
@@ -754,7 +829,7 @@ class ProviderCompletionMediaView(APIView):
             return Response({'error': 'media file is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
         data = request.data.copy()
-        data['media_url']     = media_url
+        data['media_url'] = media_url
         data['thumbnail_url'] = thumbnail_url
 
         serializer = CompletionMediaWriteSerializer(data=data)
@@ -765,10 +840,7 @@ class ProviderCompletionMediaView(APIView):
     def delete(self, request, booking_id, media_id):
         form = self.get_form(request, booking_id)
         if not form:
-            return Response(
-                {'error': 'Completion form not found.'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            return Response({'error': 'Completion form not found.'}, status=status.HTTP_404_NOT_FOUND)
         if form.is_finished:
             return Response(
                 {'error': 'Cannot delete media from a finished form.'},
@@ -777,189 +849,88 @@ class ProviderCompletionMediaView(APIView):
         try:
             media = CompletionMedia.objects.get(id=media_id, form=form)
         except CompletionMedia.DoesNotExist:
-            return Response(
-                {'error': 'Media not found.'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            return Response({'error': 'Media not found.'}, status=status.HTTP_404_NOT_FOUND)
         media.delete()
         return Response({'message': 'Media deleted successfully.'}, status=status.HTTP_200_OK)
-    """
-    GET /admin/completion-forms/<booking_id>/  → الأدمن يشوف النموذج
-    """
-    permission_classes = [IsAdminUser]
-
-    def get(self, request, booking_id):
-        try:
-            form = ServiceCompletionForm.objects.get(booking__id=booking_id)
-        except ServiceCompletionForm.DoesNotExist:
-            return Response(
-                {'error': 'Completion form not found.'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        return Response(ServiceCompletionFormSerializer(form).data)
-    
-from .models import Coupon
-from .serializers import (
-    CouponAdminSerializer,
-    CouponWriteSerializer,
-    CouponValidateSerializer,
-    CouponSerializer,  # Added missing import
-)
-
-# ==================== CLIENT - COUPON VALIDATE ====================
-
-class CouponValidateView(APIView):
-    """
-    POST /coupons/validate/
-    العميل يتحقق من الكوبون ويشوف الخصم قبل الحجز
-    """
-    permission_classes = [IsCustomer]
-
-    def post(self, request):
-        serializer = CouponValidateSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-
-        coupon     = serializer.validated_data['coupon']
-        total_cost = serializer.validated_data['total_cost']
-        discount   = coupon.calc_discount(total_cost)
-
-        return Response({
-            'coupon':          CouponSerializer(coupon).data,
-            'original_cost':   total_cost,
-            'discount_amount': discount,
-            'final_cost':      round(total_cost - discount, 2),
-        })
 
 
-# ==================== ADMIN - COUPON VIEWS ====================
-
-class AdminCouponListView(APIView):
-    permission_classes = [IsAdminUser]
+class ProviderCompletionFormListView(APIView):
+    permission_classes = [IsProvider]
 
     def get(self, request):
-        is_active = request.query_params.get('is_active')
-        coupons   = Coupon.objects.all()
+        is_finished_param = request.query_params.get('is_finished')
 
-        if is_active == 'true':
-            coupons = coupons.filter(is_active=True)
-        elif is_active == 'false':
-            coupons = coupons.filter(is_active=False)
+        forms = ServiceCompletionForm.objects.filter(
+            booking__isnull=False,
+            booking__provider=request.user,
+        ).select_related(
+            'booking__service',
+            'booking__address',
+            'booking__address__city',
+            'booking__address__region',
+        ).prefetch_related(
+            'booking__service__attributes'
+        ).order_by('-created_at')
 
-        return Response(CouponAdminSerializer(coupons, many=True).data)
+        if is_finished_param == 'true':
+            forms = forms.filter(is_finished=True)
+        elif is_finished_param == 'false':
+            forms = forms.filter(is_finished=False)
 
-    def post(self, request):
-        serializer = CouponWriteSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        coupon = serializer.save()
         return Response(
-            CouponAdminSerializer(coupon).data,
-            status=status.HTTP_201_CREATED
+            ProviderCompletionFormListSerializer(forms, many=True).data,
+            status=status.HTTP_200_OK
         )
 
 
-class AdminCouponDetailView(APIView):
-    permission_classes = [IsAdminUser]
-
-    def get_object(self, coupon_id):
-        try:
-            return Coupon.objects.get(id=coupon_id)
-        except Coupon.DoesNotExist:
-            return None
-
-    def get(self, request, coupon_id):
-        coupon = self.get_object(coupon_id)
-        if not coupon:
-            return Response({'error': 'Coupon not found.'}, status=status.HTTP_404_NOT_FOUND)
-        return Response(CouponAdminSerializer(coupon).data)
-
-    def patch(self, request, coupon_id):
-        coupon = self.get_object(coupon_id)
-        if not coupon:
-            return Response({'error': 'Coupon not found.'}, status=status.HTTP_404_NOT_FOUND)
-        serializer = CouponWriteSerializer(coupon, data=request.data, partial=True)
-        serializer.is_valid(raise_exception=True)
-        serializer.save()
-        return Response(CouponAdminSerializer(coupon).data)
-
-    def delete(self, request, coupon_id):
-        coupon = self.get_object(coupon_id)
-        if not coupon:
-            return Response({'error': 'Coupon not found.'}, status=status.HTTP_404_NOT_FOUND)
-        coupon.delete()
-        return Response({'message': 'Coupon deleted.'}, status=status.HTTP_200_OK)
-    
-
-class AdminAvailableProvidersForServiceView(APIView):
+class CustomerConfirmProviderArrivalView(APIView):
     """
-    GET /admin/services/<service_id>/available-providers/
-    يجيب الفنيين اللي عندهم نفس تخصص الخدمة ومش متعينين فيها
+    POST /bookings/<booking_id>/provider-arrived/
+    العميل يأكد إن الفني وصل → status يتحول لـ provider_arrived
+    و started_at بياخد وقت وتاريخ اللحظة دي.
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsCustomer]
 
-    def get(self, request, service_id):
+    def post(self, request, booking_id):
         try:
-            service = ExistedService.objects.get(id=service_id)
-        except ExistedService.DoesNotExist:
-            return Response({'error': 'Service not found.'}, status=status.HTTP_404_NOT_FOUND)
+            form = ServiceCompletionForm.objects.get(
+                booking__id=booking_id,
+                booking__customer=request.user
+            )
+        except ServiceCompletionForm.DoesNotExist:
+            return Response({'error': 'Completion form not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        # الفنيين اللي متعينين بالفعل في الخدمة دي
-        assigned_ids = ServiceProvider.objects.filter(
-            service=service
-        ).values_list('provider_id', flat=True)
+        if form.status == 'provider_arrived':
+            return Response(
+                {'error': 'Provider arrival already confirmed.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
-        from accounts.models import Provider
-        providers = Provider.objects.filter(
-            is_active=True,
-            is_approved=True,
-        ).exclude(id__in=assigned_ids)
+        form.status = 'provider_arrived'
+        form.started_at = timezone.now()
+        form.save(update_fields=['status', 'started_at'])
 
-        # لو الخدمة عندها تخصص، فلتر بيه
-        if service.specialization:
-            providers = providers.filter(specialization=service.specialization)
+        return Response(ServiceCompletionFormSerializer(form).data, status=status.HTTP_200_OK)
 
-        data = [
-            {
-                'id': str(p.id),
-                'name': p.name,
-                'phone_number': p.phone_number,
-                'specialization': p.specialization.name if p.specialization else None,
-            }
-            for p in providers
-        ]
-        return Response(data)
-    
 
-class AdminBookingAssignProviderView(APIView):
-    permission_classes = [IsAdminUser]
+class CustomerCompletionFormView(APIView):
+    """GET /bookings/<booking_id>/completion/ — العميل يشوف تفاصيل نموذج الإتمام"""
+    permission_classes = [IsCustomer]
 
-    def patch(self, request, booking_id):
+    def get(self, request, booking_id):
         try:
-            booking = Booking.objects.get(id=booking_id)
-        except Booking.DoesNotExist:
-            return Response({'error': 'Booking not found.'}, status=404)
+            form = ServiceCompletionForm.objects.get(
+                booking__id=booking_id,
+                booking__customer=request.user
+            )
+        except ServiceCompletionForm.DoesNotExist:
+            return Response({'error': 'Completion form not found.'}, status=status.HTTP_404_NOT_FOUND)
+        return Response(ServiceCompletionFormSerializer(form).data)
 
-        provider_id = request.data.get('provider_id')
-        if not provider_id:
-            return Response({'error': 'provider_id is required.'}, status=400)
-
-        from accounts.models import Provider
-        try:
-            provider = Provider.objects.get(id=provider_id, is_active=True, is_approved=True)
-        except Provider.DoesNotExist:
-            return Response({'error': 'Provider not found.'}, status=404)
-
-        booking.provider = provider
-        booking.save(update_fields=['provider'])
-        return Response(BookingAdminSerializer(booking).data)
-    
 
 # ==================== PREVIOUS WORK VIEWS ====================
 
 class ServicePreviousWorksView(APIView):
-    """
-    GET /services/<service_id>/previous-works/
-    العميل يشوف الأعمال السابقة للخدمة (قبل/بعد)
-    """
     permission_classes = [AllowAny]
 
     def get(self, request, service_id):
@@ -970,6 +941,7 @@ class ServicePreviousWorksView(APIView):
 
         works = service.previous_works.select_related('completion_form').all()
         return Response(PreviousWorkSerializer(works, many=True).data)
+
 
 class ProviderPreviousWorkView(APIView):
     permission_classes = [IsProviderOrAdmin]
@@ -1001,7 +973,6 @@ class ProviderPreviousWorkView(APIView):
         if not form:
             return Response({'error': 'Completion form not found.'}, status=404)
 
-        # ← لازم العميل يكون أكد وصول الفني الأول
         if form.status != 'provider_arrived':
             return Response(
                 {'error': 'لا يمكن رفع before_image قبل تأكيد العميل وصول الفني.'},
@@ -1037,7 +1008,7 @@ class ProviderPreviousWorkView(APIView):
 
         try:
             before_url = _resolve_image_field(request, 'before_image', folder="previous_works")
-            after_url  = _resolve_image_field(request, 'after_image', folder="previous_works")
+            after_url = _resolve_image_field(request, 'after_image', folder="previous_works")
         except ValueError as e:
             return Response({'error': str(e)}, status=400)
 
@@ -1059,7 +1030,8 @@ class ProviderPreviousWorkView(APIView):
         work.delete()
         return Response({'message': 'Previous work deleted successfully.'})
 
-from accounts.permissions import IsProvider
+
+# ==================== PROVIDER - BOOKING VIEWS ====================
 
 class ProviderBookingListView(APIView):
     permission_classes = [IsProvider]
@@ -1067,10 +1039,10 @@ class ProviderBookingListView(APIView):
     def get(self, request):
         status_filter = request.query_params.get('status')
         bookings = Booking.objects.filter(provider=request.user).select_related(
-            'customer', 'service'
-        ).prefetch_related('items__attribute')
+            'customer', 'service', 'address'
+        )
 
-        if status_filter in ('pending', 'confirmed', 'completed', 'cancelled'):
+        if status_filter in dict(Booking.STATUS_CHOICES):
             bookings = bookings.filter(status=status_filter)
 
         return Response(BookingAdminSerializer(bookings, many=True).data)
@@ -1082,16 +1054,15 @@ class ProviderBookingDetailView(APIView):
     def get(self, request, booking_id):
         try:
             booking = Booking.objects.select_related(
-                'customer', 'service'
-            ).prefetch_related('items__attribute').get(
-                id=booking_id, provider=request.user
-            )
+                'customer', 'service', 'address'
+            ).get(id=booking_id, provider=request.user)
         except Booking.DoesNotExist:
             return Response({'error': 'Booking not found.'}, status=404)
         return Response(BookingAdminSerializer(booking).data)
 
 
 class ProviderBookingStatusView(APIView):
+    """الفني بيقدر بس يقفل الحجز (confirmed → completed) — تحديد السعر بيفضل حصري للأدمن"""
     permission_classes = [IsProvider]
 
     def post(self, request, booking_id):
@@ -1107,91 +1078,3 @@ class ProviderBookingStatusView(APIView):
         booking.status = serializer.validated_data['status']
         booking.save(update_fields=['status'])
         return Response(BookingAdminSerializer(booking).data)
-    
-
-class ProviderCompletionFormListView(APIView):
-    permission_classes = [IsProvider]
-
-    def get(self, request):
-        is_finished_param = request.query_params.get('is_finished')
-
-        forms = ServiceCompletionForm.objects.filter(
-            booking__isnull=False,
-            booking__provider=request.user,
-        ).select_related(
-            'booking__service',
-            'booking__address',
-            'booking__address__city',
-            'booking__address__region',
-        ).prefetch_related(
-            'booking__items__attribute'
-        ).order_by('-created_at')
-
-        if is_finished_param == 'true':
-            forms = forms.filter(is_finished=True)
-        elif is_finished_param == 'false':
-            forms = forms.filter(is_finished=False)
-
-        return Response(
-            ProviderCompletionFormListSerializer(forms, many=True).data,
-            status=status.HTTP_200_OK
-        )
-    
-
-from django.utils import timezone
-
-class CustomerConfirmProviderArrivalView(APIView):
-    """
-    POST /bookings/<booking_id>/provider-arrived/
-    العميل يأكد إن الفني وصل → status يتحول لـ provider_arrived
-    و started_at بياخد وقت وتاريخ اللحظة دي.
-    """
-    permission_classes = [IsCustomer]
-
-    def post(self, request, booking_id):
-        try:
-            form = ServiceCompletionForm.objects.get(
-                booking__id=booking_id,
-                booking__customer=request.user
-            )
-        except ServiceCompletionForm.DoesNotExist:
-            return Response(
-                {'error': 'Completion form not found.'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-        if form.status == 'provider_arrived':
-            return Response(
-                {'error': 'Provider arrival already confirmed.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        form.status     = 'provider_arrived'
-        form.started_at = timezone.now()
-        form.save(update_fields=['status', 'started_at'])
-
-        return Response(
-            ServiceCompletionFormSerializer(form).data,
-            status=status.HTTP_200_OK
-        )
-    
-
-class CustomerCompletionFormView(APIView):
-    """
-    GET /bookings/<booking_id>/completion/
-    العميل يشوف تفاصيل نموذج الإتمام بتاع حجزه (بدون تعديل)
-    """
-    permission_classes = [IsCustomer]
-
-    def get(self, request, booking_id):
-        try:
-            form = ServiceCompletionForm.objects.get(
-                booking__id=booking_id,
-                booking__customer=request.user
-            )
-        except ServiceCompletionForm.DoesNotExist:
-            return Response(
-                {'error': 'Completion form not found.'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        return Response(ServiceCompletionFormSerializer(form).data)
