@@ -625,3 +625,27 @@ class ProviderCompletionFormListSerializer(serializers.Serializer):
             return []
         attributes = obj.booking.service.attributes.all()
         return ServiceAttributeInlineSerializer(attributes, many=True).data
+    
+
+class AdminConfirmPriceOnBehalfSerializer(serializers.Serializer):
+    """
+    الأدمن بيأكد أو يرفض السعر بالنيابة عن العميل — مثلاً لو العميل
+    وافق تليفونيًا وعايز الأدمن يسجلها يدويًا في النظام.
+    accept=True  → confirmed
+    accept=False → cancelled
+    """
+    accept = serializers.BooleanField()
+
+    def validate(self, attrs):
+        booking = self.context['booking']
+        if booking.status != 'price_proposed':
+            raise serializers.ValidationError(
+                "الحجز مش في حالة انتظار موافقة العميل."
+            )
+        return attrs
+
+    def save(self):
+        booking = self.context['booking']
+        booking.status = 'confirmed' if self.validated_data['accept'] else 'cancelled'
+        booking.save(update_fields=['status'])
+        return booking

@@ -17,7 +17,7 @@ from .models import (
 from utils.cloudinary import upload_image, upload_video
 from .serializers import (
     # Service
-    ExistedServiceListSerializer,
+    ExistedServiceListSerializer,AdminConfirmPriceOnBehalfSerializer,
     ExistedServiceDetailSerializer,
     ExistedServiceAdminListSerializer,
     PreviousWorkSerializer,
@@ -1078,3 +1078,27 @@ class ProviderBookingStatusView(APIView):
         booking.status = serializer.validated_data['status']
         booking.save(update_fields=['status'])
         return Response(BookingAdminSerializer(booking).data)
+    
+class AdminConfirmPriceOnBehalfView(APIView):
+    """
+    POST /admin/bookings/<booking_id>/confirm-price/
+    الأدمن يأكد أو يرفض السعر بالنيابة عن العميل (تسجيل موافقة تليفونية
+    مثلاً). ده منفصل عن AdminBookingStatusView عمدًا — الانتقال من
+    price_proposed محجوز أساسًا للعميل عبر price-decision، والـ endpoint
+    ده استثناء إداري صريح.
+    body: {"accept": true|false}
+    """
+    permission_classes = [IsAdminUser]
+
+    def post(self, request, booking_id):
+        try:
+            booking = Booking.objects.get(id=booking_id)
+        except Booking.DoesNotExist:
+            return Response({'error': 'Booking not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = AdminConfirmPriceOnBehalfSerializer(
+            data=request.data, context={'booking': booking}
+        )
+        serializer.is_valid(raise_exception=True)
+        booking = serializer.save()
+        return Response(BookingAdminSerializer(booking).data, status=status.HTTP_200_OK)

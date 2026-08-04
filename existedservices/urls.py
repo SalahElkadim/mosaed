@@ -8,7 +8,8 @@ from .views import (
     AdminExistedServiceDetailView,
     # Admin - Attributes
     AdminServiceAttributeListView,
-    AdminServiceAttributeDetailView,
+    AdminServiceAttributeDetailView,    AdminConfirmPriceOnBehalfView,
+
     ProviderBookingStatusView,
     # Client - Bookings
     CustomerBookingListView,
@@ -104,4 +105,5 @@ urlpatterns = [
     # ==================== PROVIDER - BOOKINGS ====================
     path('provider/bookings/<uuid:booking_id>/', ProviderBookingDetailView.as_view(), name='provider-booking-detail'),
     path('provider/bookings/<uuid:booking_id>/status/', ProviderBookingStatusView.as_view(), name='provider-booking-status'),
+    path('admin/bookings/<uuid:booking_id>/confirm-price/', AdminConfirmPriceOnBehalfView.as_view(), name='admin-booking-confirm-price'),
 ]
