@@ -21,14 +21,15 @@ from django.utils import timezone
 class PaymentRequest(models.Model):
     """
     نموذج الدفع — بيتعمل تلقائيًا (عبر signal) لما الفني يعلّم
-    ServiceCompletionForm بتاع custom_request كـ finished.
+    ServiceCompletionForm (سواء لـ custom_request أو لـ booking) كـ
+    finished.
     """
-
+ 
     METHOD_CHOICES = [
         ('online', 'Online'),
         ('cash', 'Cash'),
     ]
-
+ 
     STATUS_CHOICES = [
         ('awaiting_method', 'Awaiting Method'),                # لسه العميل مختارش
         ('awaiting_gateway_payment', 'Awaiting Gateway Payment'),  # اختار أونلاين، مستني يدفع فعليًا
@@ -36,19 +37,20 @@ class PaymentRequest(models.Model):
         ('paid', 'Paid'),
         ('failed', 'Failed'),
     ]
-
+ 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-
+ 
     completion_form = models.OneToOneField(
         'existedservices.ServiceCompletionForm',
         on_delete=models.CASCADE,
         related_name='payment_request'
     )
-
-    # snapshot من الـ ServiceOffer المقبول وقت إنشاء نموذج الدفع
-    amount         = models.DecimalField(max_digits=10, decimal_places=2)  # = final_price (اللي العميل بيدفعه)
-    provider_share = models.DecimalField(max_digits=10, decimal_places=2)  # = provider_price
-    platform_share = models.DecimalField(max_digits=10, decimal_places=2)  # = platform_fee
+ 
+    # snapshot وقت إنشاء نموذج الدفع — من الـ ServiceOffer المقبول
+    # (custom_request) أو من booking.price + service.visit_cost (existed)
+    amount         = models.DecimalField(max_digits=10, decimal_places=2)  # = المبلغ اللي العميل بيدفعه
+    provider_share = models.DecimalField(max_digits=10, decimal_places=2)  # نصيب الفني
+    platform_share = models.DecimalField(max_digits=10, decimal_places=2)  # نصيب المنصة
     points_used            = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     points_discount_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     marketing_discount_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
@@ -58,48 +60,70 @@ class PaymentRequest(models.Model):
     status = models.CharField(
         max_length=30, choices=STATUS_CHOICES, default='awaiting_method'
     )
-
+ 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     paid_at    = models.DateTimeField(null=True, blank=True)
-
+ 
     class Meta:
         db_table     = 'payment_requests'
         verbose_name = 'Payment Request'
         ordering     = ['-created_at']
-
+ 
     def __str__(self):
         return f"PaymentRequest#{self.id} — {self.amount} ر.س ({self.status})"
-
+ 
+    # ==================== مصدر الطلب (custom_request أو booking) ====================
+ 
     @property
     def custom_request(self):
         return self.completion_form.custom_request
-
+ 
     @property
-    def provider(self):
-        cr = self.custom_request
-        return cr.accepted_provider if cr else None
-
+    def booking(self):
+        return self.completion_form.booking
+ 
+    # ==================== العميل ====================
+ 
     @property
     def customer(self):
         cr = self.custom_request
-        return cr.customer if cr else None
-
+        if cr:
+            return cr.customer
+        booking = self.booking
+        return booking.customer if booking else None
+ 
     @property
     def customer_id(self):
         cr = self.custom_request
-        return cr.customer_id if cr else None
-
+        if cr:
+            return cr.customer_id
+        booking = self.booking
+        return booking.customer_id if booking else None
+ 
+    # ==================== الفني ====================
+ 
+    @property
+    def provider(self):
+        cr = self.custom_request
+        if cr:
+            return cr.accepted_provider
+        booking = self.booking
+        return booking.provider if booking else None
+ 
     @property
     def provider_id(self):
         cr = self.custom_request
-        return cr.accepted_provider_id if cr else None
-
+        if cr:
+            return cr.accepted_provider_id
+        booking = self.booking
+        return booking.provider_id if booking else None
+ 
     @property
     def final_amount(self):
         """المبلغ الفعلي المطلوب دفعه بعد خصم النقاط (لو اتستخدمت)"""
-        return self.amount - self.points_discount_amount- self.marketing_discount_amount
-
+        return self.amount - self.points_discount_amount - self.marketing_discount_amount
+ 
     def mark_paid(self):
         if self.status != 'paid':
             self.status  = 'paid'
