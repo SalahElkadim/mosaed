@@ -93,8 +93,8 @@ def create_payment_request_on_finish(sender, instance, created, **kwargs):
             'amount':         amount,
             'provider_share': provider_share,
             'platform_share': platform_share,
-        }
-    )
+            'customer_id':    customer_id,
+        })
 
     if was_created:
         if custom_request:  # ماركتنج كود مقصور على custom_request بس
