@@ -73,14 +73,15 @@ def create_payment_request_on_finish(sender, instance, created, **kwargs):
         customer_id    = custom_request.customer_id
 
     elif booking:
-        amount = booking.final_cost
-        if not amount or amount <= 0:
+        visit_cost = booking.service.visit_cost or Decimal('0')
+        amount = (booking.price or Decimal('0')) + visit_cost
+        if amount <= 0:
             return
 
         commission_percentage = _get_existed_services_commission_percentage()
         platform_share = (amount * commission_percentage / Decimal('100')).quantize(Decimal('0.01'))
         provider_share = amount - platform_share
-        customer_id    = booking.customer_id
+        customer_id = booking.customer_id
 
     else:
         # الفورم مش مربوط بأي طلب/حجز فعلي (حالة نادرة/دفاعية) — متعملش دفع
