@@ -243,14 +243,16 @@ class Notification(models.Model):
     ]
  
     EVENT_CHOICES = [
-        ('new_custom_request', 'New Custom Request'),
-        ('new_offer', 'New Offer'),
-        ('offer_accepted', 'Offer Accepted'),
-        ('new_chat_message', 'New Chat Message'),
-        ('payment_received', 'Payment Received'),           # ← جديد
-        ('due_payment_required', 'Due Payment Required'),    # ← جديد
-        ('account_unblocked', 'Account Unblocked'),
-    ]
+    ('new_custom_request', 'New Custom Request'),
+    ('new_offer', 'New Offer'),
+    ('offer_accepted', 'Offer Accepted'),
+    ('new_chat_message', 'New Chat Message'),
+    ('payment_received', 'Payment Received'),
+    ('due_payment_required', 'Due Payment Required'),
+    ('account_unblocked', 'Account Unblocked'),
+    ('payment_required', 'Payment Required'),
+    ('points_credited', 'Points Credited'),
+]
  
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
  
