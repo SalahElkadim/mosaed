@@ -65,6 +65,18 @@ def send_push_to_tokens(tokens, title, body, data=None):
             notification=messaging.Notification(title=title, body=body),
             data=string_data,
             token=token,
+            android=messaging.AndroidConfig(
+                priority='high',
+                notification=messaging.AndroidNotification(
+                    channel_id='default_channel',  # لازم يطابق الـ channel المعرف في كود الموبايل
+                ),
+            ),
+            apns=messaging.APNSConfig(
+                headers={'apns-priority': '10'},
+                payload=messaging.APNSPayload(
+                    aps=messaging.Aps(sound='default', content_available=True),
+                ),
+            ),
         )
         try:
             messaging.send(message)
