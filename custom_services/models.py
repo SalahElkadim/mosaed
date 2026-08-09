@@ -123,6 +123,28 @@ class CustomRequest(models.Model):
         return False
 
 
+
+class CustomRequestImage(models.Model):
+    """
+    صورة واحدة من صور الطلب المخصص — الطلب ممكن يكون له أكتر من صورة.
+    """
+    id      = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    request = models.ForeignKey(
+        CustomRequest,
+        on_delete=models.CASCADE,
+        related_name='images'
+    )
+    image      = models.URLField()   # Cloudinary URL
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'custom_request_images'
+        ordering = ['created_at']
+        verbose_name = 'Custom Request Image'
+
+    def __str__(self):
+        return f"Image for {self.request_id}"
+
 # ==================== SERVICE OFFER ====================
 
 class ServiceOffer(models.Model):
@@ -321,3 +343,27 @@ class DeviceToken(models.Model):
     def __str__(self):
         return f"{self.recipient_type}:{self.recipient_id} — {self.token[:20]}..."
  
+
+class OnboardingSlide(models.Model):
+    """
+    سلايدز شاشة الـ onboarding الأولى للتطبيق (صورة + عنوان + نص).
+    الأدمن هو اللي بيتحكم فيها من لوحة التحكم.
+    """
+    id          = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    image       = models.URLField()          # Cloudinary URL
+    title       = models.CharField(max_length=255)
+    description = models.TextField()
+
+    order      = models.PositiveIntegerField(default=0)   # ترتيب العرض
+    is_active  = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table     = 'onboarding_slides'
+        verbose_name = 'Onboarding Slide'
+        ordering     = ['order', 'created_at']
+
+    def __str__(self):
+        return f"{self.order}. {self.title}"

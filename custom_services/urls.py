@@ -6,7 +6,7 @@ from .views import (
     CustomerCancelRequestView,
     CustomerOfferListView,
     CustomerAcceptOfferView,
-    CustomerChatView,DeviceTokenView,
+    CustomerChatView,DeviceTokenView,OnboardingListView,
     # Provider
     ProviderCustomRequestListView,
     ProviderCustomRequestDetailView,
@@ -74,6 +74,8 @@ urlpatterns = [
     path('provider/offers/<uuid:offer_id>/',
          ProviderOfferWithdrawView.as_view(),
          name='provider-offer-withdraw'),
+     path('onboarding/', OnboardingListView.as_view(), name='onboarding-list'),
+
 
      
 

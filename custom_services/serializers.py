@@ -4,7 +4,7 @@ from django.utils import timezone
 from accounts.models import CustomerAddress, Provider, Specialization
 from accounts.serializers import CustomerAddressSerializer, SpecializationSerializer
 
-from .models import CustomRequest, ServiceOffer, RequestChat, PlatformSettings
+from .models import CustomRequest, ServiceOffer, RequestChat, PlatformSettings,CustomRequestImage,OnboardingSlide
 
 
 # ==================== PLATFORM SETTINGS ====================
@@ -16,6 +16,13 @@ class PlatformSettingsSerializer(serializers.ModelSerializer):
         read_only_fields = ['key', 'updated_at']
 
 
+
+
+class CustomRequestImageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CustomRequestImage
+        fields = ['id', 'image', 'created_at']
+        read_only_fields = fields
 # ==================== CUSTOM REQUEST ====================
 
 class CustomRequestCreateSerializer(serializers.Serializer):
@@ -23,7 +30,6 @@ class CustomRequestCreateSerializer(serializers.Serializer):
     specialization_id = serializers.UUIDField()
     title             = serializers.CharField(max_length=255)
     description       = serializers.CharField()
-    image             = serializers.URLField(required=False, allow_blank=True)
     scheduled_date    = serializers.DateField()
 
     # العنوان — إما ID من عناوينه أو عنوان جديد
@@ -78,7 +84,7 @@ class CustomRequestUpdateSerializer(serializers.ModelSerializer):
     """
     class Meta:
         model  = CustomRequest
-        fields = ['title', 'description', 'image', 'specialization', 'scheduled_date']
+        fields = ['title', 'description', 'specialization', 'scheduled_date']
 
     def validate(self, attrs):
         request_obj = self.instance
@@ -114,11 +120,11 @@ class CustomRequestListSerializer(serializers.ModelSerializer):
     offers_count = serializers.IntegerField(
         source='offers.count', read_only=True
     )
-
+    images = CustomRequestImageSerializer(many=True, read_only=True)
     class Meta:
         model  = CustomRequest
         fields = [
-            'id', 'title', 'specialization_name',
+            'id', 'title', 'specialization_name','images',
             'city', 'region', 'district',
             'scheduled_date', 'status', 'expires_at',
             'offers_count', 'created_at'
@@ -131,11 +137,11 @@ class CustomRequestDetailSerializer(serializers.ModelSerializer):
     specialization = SpecializationSerializer(read_only=True)
     address        = CustomerAddressSerializer(read_only=True)
     offers_count   = serializers.IntegerField(source='offers.count', read_only=True)
-
+    images = CustomRequestImageSerializer(many=True, read_only=True)
     class Meta:
         model  = CustomRequest
         fields = [
-            'id', 'title', 'description', 'image',
+            'id', 'title', 'description', 'images',
             'specialization', 'address',
             'scheduled_date', 'status', 'expires_at',
             'accepted_provider', 'offers_count',
@@ -153,7 +159,7 @@ class CustomRequestProviderDetailSerializer(serializers.ModelSerializer):
 
     # هل الفني ده عمل عرض قبل كده؟
     my_offer = serializers.SerializerMethodField()
-
+    images = CustomRequestImageSerializer(many=True, read_only=True)
     def get_my_offer(self, obj):
         provider = self.context['request'].user
         offer    = obj.offers.filter(provider=provider).first()
@@ -164,7 +170,7 @@ class CustomRequestProviderDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model  = CustomRequest
         fields = [
-            'id', 'title', 'description', 'image',
+            'id', 'title', 'description', 'images',
             'specialization', 'city', 'region', 'district',
             'scheduled_date', 'status', 'expires_at',
             'my_offer', 'created_at'
@@ -182,12 +188,12 @@ class CustomRequestAdminSerializer(serializers.ModelSerializer):
         source='accepted_provider.name', read_only=True
     )
     offers_count = serializers.IntegerField(source='offers.count', read_only=True)
-
+    images = CustomRequestImageSerializer(many=True, read_only=True)
     class Meta:
         model  = CustomRequest
         fields = [
             'id', 'customer_name', 'customer_phone',
-            'title', 'description', 'image',
+            'title', 'description', 'images',
             'specialization', 'address',
             'scheduled_date', 'status', 'expires_at',
             'accepted_provider', 'accepted_provider_name',
@@ -541,3 +547,11 @@ class ProviderCustomCompletionFormListSerializer(serializers.Serializer):
         return payment_request.status if payment_request else None
     
 
+
+
+
+class OnboardingSlideSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = OnboardingSlide
+        fields = ['id', 'image', 'title', 'description', 'order']
+        read_only_fields = fields

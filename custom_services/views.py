@@ -8,7 +8,7 @@ from utils.cloudinary import upload_image, upload_video
 from accounts.permissions import IsCustomer, IsProvider, IsProviderOrAdmin
 from .models import (
     CustomRequest, ServiceOffer, RequestChat,Notification,
-    PlatformSettings,DeviceToken
+    PlatformSettings,DeviceToken,CustomRequestImage
 )
 from existedservices.views import _resolve_image_field  # أو تنقلها لملف utils مشترك
 from existedservices.models import ServiceCompletionForm, CompletionMedia , Booking,PreviousWork
@@ -116,34 +116,45 @@ import uuid as uuid_lib
 from django.core.files.base import ContentFile
 
 
-def _resolve_uploaded_image(request, folder):
+MAX_CUSTOM_REQUEST_IMAGES = 5
+
+def _resolve_uploaded_images(request, folder):
     """
-    بيرجع Cloudinary URL لو فيه صورة مبعوتة (multipart أو base64)، وإلا None.
-    - Multipart: request.FILES['image']
-    - Base64: request.data['image'] = "data:image/png;base64,...." أو base64 خام
+    بترجع list من Cloudinary URLs لكل الصور المبعوتة، سواء:
+    - multipart: request.FILES.getlist('images')  ← نفس المفتاح لأكتر من ملف
+    - base64: request.data['images'] كـ list من strings
     """
-    if 'image' in request.FILES:
-        return upload_image(request.FILES['image'], folder=folder)
+    urls = []
 
-    image_field = request.data.get('image')
-    if image_field and isinstance(image_field, str) and not image_field.startswith('http'):
-        # لو جاي بصيغة data URI: data:image/jpeg;base64,xxxx
-        if ';base64,' in image_field:
-            header, image_field = image_field.split(';base64,', 1)
-            ext = header.split('/')[-1] if '/' in header else 'jpg'
-        else:
-            ext = 'jpg'
+    # multipart
+    for f in request.FILES.getlist('images'):
+        urls.append(upload_image(f, folder=folder))
 
-        try:
-            decoded = base64.b64decode(image_field)
-        except (TypeError, ValueError, base64.binascii.Error):
-            raise ValueError("صيغة الصورة (base64) غير صحيحة.")
+    # base64
+    images_field = (
+        request.data.getlist('images')
+        if hasattr(request.data, 'getlist') else request.data.get('images')
+    )
+    if images_field:
+        if isinstance(images_field, str):
+            images_field = [images_field]
+        for item in images_field:
+            if not isinstance(item, str) or item.startswith('http'):
+                continue
+            if ';base64,' in item:
+                header, raw = item.split(';base64,', 1)
+                ext = header.split('/')[-1] if '/' in header else 'jpg'
+            else:
+                raw, ext = item, 'jpg'
+            try:
+                decoded = base64.b64decode(raw)
+            except (TypeError, ValueError, base64.binascii.Error):
+                raise ValueError("صيغة إحدى الصور (base64) غير صحيحة.")
+            file = ContentFile(decoded, name=f"{uuid_lib.uuid4()}.{ext}")
+            urls.append(upload_image(file, folder=folder))
 
-        file = ContentFile(decoded, name=f"{uuid_lib.uuid4()}.{ext}")
-        return upload_image(file, folder=folder)
+    return urls
 
-    return None
-# ==================== CUSTOMER VIEWS ====================
 
 class CustomerCustomRequestListView(APIView):
     """
@@ -205,20 +216,27 @@ class CustomerCustomRequestListView(APIView):
 
     def post(self, request):
         data = request.data.copy()
+
         try:
-            image_url = _resolve_uploaded_image(request, folder="custom_requests")
+            image_urls = _resolve_uploaded_images(request, folder="custom_requests")
         except ValueError as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-        if image_url:
-            data['image'] = image_url
+        if len(image_urls) > MAX_CUSTOM_REQUEST_IMAGES:
+            return Response(
+                {'error': f'الحد الأقصى {MAX_CUSTOM_REQUEST_IMAGES} صور لكل طلب.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
-        serializer = CustomRequestCreateSerializer(
-            data=data,
-            context={'request': request}
-        )
+        serializer = CustomRequestCreateSerializer(data=data, context={'request': request})
         serializer.is_valid(raise_exception=True)
         custom_request = serializer.save()
+
+        if image_urls:
+            CustomRequestImage.objects.bulk_create([
+                CustomRequestImage(request=custom_request, image=url) for url in image_urls
+            ])
+
         return Response(
             CustomRequestDetailSerializer(custom_request).data,
             status=status.HTTP_201_CREATED
@@ -251,7 +269,6 @@ class CustomerCustomRequestDetailView(APIView):
             CustomRequestDetailSerializer(obj).data,
             status=status.HTTP_200_OK
         )
-
     def patch(self, request, request_id):
         obj = self.get_object(request, request_id)
         if not obj:
@@ -263,23 +280,34 @@ class CustomerCustomRequestDetailView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        data = request.data.copy()
+        # حذف صور محددة — request.data['remove_image_ids'] = ["id1", "id2"]
+        remove_ids = request.data.get('remove_image_ids')
+        if remove_ids:
+            if isinstance(remove_ids, str):
+                remove_ids = [remove_ids]
+            obj.images.filter(id__in=remove_ids).delete()
+
         try:
-            image_url = _resolve_uploaded_image(request, folder="custom_requests")
+            new_image_urls = _resolve_uploaded_images(request, folder="custom_requests")
         except ValueError as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-        if image_url:
-            data['image'] = image_url
+        if obj.images.count() + len(new_image_urls) > MAX_CUSTOM_REQUEST_IMAGES:
+            return Response(
+                {'error': f'الحد الأقصى {MAX_CUSTOM_REQUEST_IMAGES} صور لكل طلب.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
-        serializer = CustomRequestUpdateSerializer(obj, data=data, partial=True)
+        if new_image_urls:
+            CustomRequestImage.objects.bulk_create([
+                CustomRequestImage(request=obj, image=url) for url in new_image_urls
+            ])
+
+        serializer = CustomRequestUpdateSerializer(obj, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
-        return Response(
-            CustomRequestDetailSerializer(obj).data,
-            status=status.HTTP_200_OK
-        )
 
+        return Response(CustomRequestDetailSerializer(obj).data, status=status.HTTP_200_OK)
 
 class CustomerCancelRequestView(APIView):
     """
@@ -1543,3 +1571,22 @@ class CustomerCustomCompletionFormView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
         return Response(ServiceCompletionFormSerializer(form).data)
+    
+from .models import OnboardingSlide
+from .serializers import OnboardingSlideSerializer
+
+
+class OnboardingListView(APIView):
+    """
+    GET /onboarding/
+    بيرجع كل سلايدز الـ onboarding النشطة، مرتبة حسب order.
+    عام (مش محتاج تسجيل دخول) عشان يتعرض أول ما التطبيق يفتح.
+    """
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        slides = OnboardingSlide.objects.filter(is_active=True)
+        return Response(
+            OnboardingSlideSerializer(slides, many=True).data,
+            status=status.HTTP_200_OK
+        )
