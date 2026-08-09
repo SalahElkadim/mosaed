@@ -367,3 +367,52 @@ class OnboardingSlide(models.Model):
 
     def __str__(self):
         return f"{self.order}. {self.title}"
+    
+
+class AppMessage(models.Model):
+    """
+    رسائل/إعلانات داخل التطبيق يديرها الأدمن من غير الحاجة لتحديث
+    التطبيق. كل رسالة موجهة لنوع مستخدم واحد (عميل أو فني).
+    """
+    AUDIENCE_CHOICES = [
+        ('customer', 'Customer'),
+        ('provider', 'Provider'),
+    ]
+
+    id       = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    audience = models.CharField(max_length=20, choices=AUDIENCE_CHOICES)
+
+    title = models.CharField(max_length=255)
+    body  = models.TextField()
+    image = models.URLField(null=True, blank=True)   # اختياري
+
+    # اختياري: رابط خارجي أو داخلي يتفتح لو ضغط عليها اليوزر
+    link = models.URLField(null=True, blank=True)
+
+    is_active = models.BooleanField(default=True)
+    priority  = models.PositiveIntegerField(default=0)   # الأعلى بيظهر الأول
+
+    # جدولة اختيارية — لو عايز الرسالة تظهر في فترة محددة بس
+    start_at = models.DateTimeField(null=True, blank=True)
+    end_at   = models.DateTimeField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table     = 'app_messages'
+        verbose_name = 'App Message'
+        ordering     = ['-priority', '-created_at']
+
+    def __str__(self):
+        return f"[{self.audience}] {self.title}"
+
+    def is_currently_active(self):
+        if not self.is_active:
+            return False
+        now = timezone.now()
+        if self.start_at and now < self.start_at:
+            return False
+        if self.end_at and now > self.end_at:
+            return False
+        return True

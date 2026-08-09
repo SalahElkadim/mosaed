@@ -1,4 +1,5 @@
 from django.utils import timezone
+from django.db import models
 from django.core.exceptions import ValidationError
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -13,11 +14,11 @@ from .models import (
 from existedservices.views import _resolve_image_field  # أو تنقلها لملف utils مشترك
 from existedservices.models import ServiceCompletionForm, CompletionMedia , Booking,PreviousWork
 from .serializers import (
-    CustomRequestCreateSerializer,
+    CustomRequestCreateSerializer,OnboardingSlideAdminSerializer,
     CustomRequestUpdateSerializer,
     CustomRequestListSerializer,
     CustomRequestDetailSerializer,
-    CustomRequestProviderDetailSerializer,
+    CustomRequestProviderDetailSerializer,AppMessageAdminSerializer,
     CustomRequestAdminSerializer,
     CustomRequestStatusUpdateSerializer,
     ServiceOfferSerializer,
@@ -115,6 +116,33 @@ import base64
 import uuid as uuid_lib
 from django.core.files.base import ContentFile
 
+def _resolve_uploaded_image(request, folder):
+    """
+    بيرجع Cloudinary URL لو فيه صورة مبعوتة (multipart أو base64)، وإلا None.
+    - Multipart: request.FILES['image']
+    - Base64: request.data['image'] = "data:image/png;base64,...." أو base64 خام
+    """
+    if 'image' in request.FILES:
+        return upload_image(request.FILES['image'], folder=folder)
+
+    image_field = request.data.get('image')
+    if image_field and isinstance(image_field, str) and not image_field.startswith('http'):
+        # لو جاي بصيغة data URI: data:image/jpeg;base64,xxxx
+        if ';base64,' in image_field:
+            header, image_field = image_field.split(';base64,', 1)
+            ext = header.split('/')[-1] if '/' in header else 'jpg'
+        else:
+            ext = 'jpg'
+
+        try:
+            decoded = base64.b64decode(image_field)
+        except (TypeError, ValueError, base64.binascii.Error):
+            raise ValueError("صيغة الصورة (base64) غير صحيحة.")
+
+        file = ContentFile(decoded, name=f"{uuid_lib.uuid4()}.{ext}")
+        return upload_image(file, folder=folder)
+
+    return None
 
 MAX_CUSTOM_REQUEST_IMAGES = 5
 
@@ -668,42 +696,6 @@ class ProviderOfferCreateView(APIView):
             ServiceOfferSerializer(offer).data,
             status=status.HTTP_201_CREATED
         )
-
-
-class ProviderOfferWithdrawView(APIView):
-    """
-    DELETE /provider/offers/<offer_id>/   ← الفني يسحب عرضه
-    """
-    permission_classes = [IsProvider, IsProviderNotBlocked]
-
-    def delete(self, request, offer_id):
-        try:
-            offer = ServiceOffer.objects.get(
-                id=offer_id,
-                provider=request.user,
-                status='pending'
-            )
-        except ServiceOffer.DoesNotExist:
-            return Response(
-                {'error': 'العرض غير موجود أو لا يمكن سحبه.'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-        offer.status = 'withdrawn'
-        offer.save(update_fields=['status'])
-
-        # لو مفيش عروض pending تانية، رجّع الطلب لـ published
-        custom_request = offer.request
-        if not custom_request.offers.filter(status='pending').exists():
-            if custom_request.status == 'offers_received':
-                custom_request.status = 'published'
-                custom_request.save(update_fields=['status'])
-
-        return Response(
-            {'message': 'تم سحب العرض بنجاح.'},
-            status=status.HTTP_200_OK
-        )
-
 
 # ==================== PROVIDER - CHAT ====================
  
@@ -1590,3 +1582,197 @@ class OnboardingListView(APIView):
             OnboardingSlideSerializer(slides, many=True).data,
             status=status.HTTP_200_OK
         )
+    
+
+from django.utils import timezone
+from .models import AppMessage
+from .serializers import AppMessageSerializer
+
+
+def _active_messages_qs(audience):
+    now = timezone.now()
+    return AppMessage.objects.filter(
+        audience=audience,
+        is_active=True,
+    ).filter(
+        models.Q(start_at__isnull=True) | models.Q(start_at__lte=now)
+    ).filter(
+        models.Q(end_at__isnull=True) | models.Q(end_at__gte=now)
+    )
+
+
+class CustomerAppMessageListView(APIView):
+    """
+    GET /customer/messages/
+    الرسائل الموجهة للعميل فقط.
+    """
+    permission_classes = [IsCustomer]
+
+    def get(self, request):
+        messages = _active_messages_qs('customer')
+        return Response(
+            AppMessageSerializer(messages, many=True).data,
+            status=status.HTTP_200_OK
+        )
+
+
+class ProviderAppMessageListView(APIView):
+    """
+    GET /provider/messages/
+    الرسائل الموجهة للفني فقط.
+    """
+    permission_classes = [IsProvider]
+
+    def get(self, request):
+        messages = _active_messages_qs('provider')
+        return Response(
+            AppMessageSerializer(messages, many=True).data,
+            status=status.HTTP_200_OK
+        )
+    
+class AdminAppMessageListView(APIView):
+    """
+    GET  /admin/messages/    ← كل الرسائل (مع فلترة اختيارية بـ audience)
+    POST /admin/messages/    ← إنشاء رسالة جديدة
+    """
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        audience_filter = request.query_params.get('audience')
+
+        messages = AppMessage.objects.all()
+        if audience_filter in ('customer', 'provider'):
+            messages = messages.filter(audience=audience_filter)
+
+        return Response(
+            AppMessageAdminSerializer(messages, many=True).data,
+            status=status.HTTP_200_OK
+        )
+
+    def post(self, request):
+        serializer = AppMessageAdminSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        message = serializer.save()
+        return Response(
+            AppMessageAdminSerializer(message).data,
+            status=status.HTTP_201_CREATED
+        )
+    
+class AdminAppMessageDetailView(APIView):
+    """
+    GET    /admin/messages/<id>/
+    PATCH  /admin/messages/<id>/
+    DELETE /admin/messages/<id>/
+    """
+    permission_classes = [IsAdminUser]
+
+    def get_object(self, message_id):
+        try:
+            return AppMessage.objects.get(id=message_id)
+        except AppMessage.DoesNotExist:
+            return None
+
+    def get(self, request, message_id):
+        message = self.get_object(message_id)
+        if not message:
+            return Response({'error': 'الرسالة غير موجودة.'}, status=status.HTTP_404_NOT_FOUND)
+        return Response(AppMessageAdminSerializer(message).data, status=status.HTTP_200_OK)
+
+    def patch(self, request, message_id):
+        message = self.get_object(message_id)
+        if not message:
+            return Response({'error': 'الرسالة غير موجودة.'}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = AppMessageAdminSerializer(message, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(AppMessageAdminSerializer(message).data, status=status.HTTP_200_OK)
+
+    def delete(self, request, message_id):
+        message = self.get_object(message_id)
+        if not message:
+            return Response({'error': 'الرسالة غير موجودة.'}, status=status.HTTP_404_NOT_FOUND)
+
+        message.delete()
+        return Response({'message': 'تم الحذف بنجاح.'}, status=status.HTTP_200_OK)
+    
+
+class AdminOnboardingSlideListView(APIView):
+    """
+    GET  /admin/onboarding/    ← كل السلايدز (نشطة وغير نشطة)
+    POST /admin/onboarding/    ← إضافة سلايد جديد
+    """
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        slides = OnboardingSlide.objects.all()
+        return Response(
+            OnboardingSlideAdminSerializer(slides, many=True).data,
+            status=status.HTTP_200_OK
+        )
+
+    def post(self, request):
+        data = request.data.copy()
+        try:
+            image_url = _resolve_uploaded_image(request, folder="onboarding")
+        except ValueError as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        if image_url:
+            data['image'] = image_url
+
+        serializer = OnboardingSlideAdminSerializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        slide = serializer.save()
+        return Response(
+            OnboardingSlideAdminSerializer(slide).data,
+            status=status.HTTP_201_CREATED
+        )
+
+
+class AdminOnboardingSlideDetailView(APIView):
+    """
+    GET    /admin/onboarding/<id>/
+    PATCH  /admin/onboarding/<id>/
+    DELETE /admin/onboarding/<id>/
+    """
+    permission_classes = [IsAdminUser]
+
+    def get_object(self, slide_id):
+        try:
+            return OnboardingSlide.objects.get(id=slide_id)
+        except OnboardingSlide.DoesNotExist:
+            return None
+
+    def get(self, request, slide_id):
+        slide = self.get_object(slide_id)
+        if not slide:
+            return Response({'error': 'السلايد غير موجود.'}, status=status.HTTP_404_NOT_FOUND)
+        return Response(OnboardingSlideAdminSerializer(slide).data, status=status.HTTP_200_OK)
+
+    def patch(self, request, slide_id):
+        slide = self.get_object(slide_id)
+        if not slide:
+            return Response({'error': 'السلايد غير موجود.'}, status=status.HTTP_404_NOT_FOUND)
+
+        data = request.data.copy()
+        try:
+            image_url = _resolve_uploaded_image(request, folder="onboarding")
+        except ValueError as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        if image_url:
+            data['image'] = image_url
+
+        serializer = OnboardingSlideAdminSerializer(slide, data=data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(OnboardingSlideAdminSerializer(slide).data, status=status.HTTP_200_OK)
+
+    def delete(self, request, slide_id):
+        slide = self.get_object(slide_id)
+        if not slide:
+            return Response({'error': 'السلايد غير موجود.'}, status=status.HTTP_404_NOT_FOUND)
+
+        slide.delete()
+        return Response({'message': 'تم الحذف بنجاح.'}, status=status.HTTP_200_OK)

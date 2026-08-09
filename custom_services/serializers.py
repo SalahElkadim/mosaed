@@ -555,3 +555,34 @@ class OnboardingSlideSerializer(serializers.ModelSerializer):
         model  = OnboardingSlide
         fields = ['id', 'image', 'title', 'description', 'order']
         read_only_fields = fields
+
+
+from .models import AppMessage
+
+
+class AppMessageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = AppMessage
+        fields = ['id', 'title', 'body', 'image', 'link', 'priority', 'created_at']
+        read_only_fields = fields
+
+class AppMessageAdminSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = AppMessage
+        fields = [
+            'id', 'audience', 'title', 'body', 'image', 'link',
+            'is_active', 'priority', 'start_at', 'end_at',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class OnboardingSlideAdminSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = OnboardingSlide
+        fields = [
+            'id', 'image', 'title', 'description',
+            'order', 'is_active',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']

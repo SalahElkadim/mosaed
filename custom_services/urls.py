@@ -6,12 +6,12 @@ from .views import (
     CustomerCancelRequestView,
     CustomerOfferListView,
     CustomerAcceptOfferView,
-    CustomerChatView,DeviceTokenView,OnboardingListView,
+    CustomerChatView,DeviceTokenView,OnboardingListView,CustomerAppMessageListView,ProviderAppMessageListView,
     # Provider
     ProviderCustomRequestListView,
-    ProviderCustomRequestDetailView,
+    ProviderCustomRequestDetailView,AdminAppMessageListView,AdminAppMessageDetailView,AdminOnboardingSlideListView,
     ProviderOfferCreateView,
-    ProviderOfferWithdrawView,ProviderCustomCompletionFormListView,
+    ProviderOfferWithdrawView,ProviderCustomCompletionFormListView,AdminOnboardingSlideDetailView,
     ProviderChatView,CustomerCustomCompletionFormView,
     ProviderCustomCompletionFormView,
     ProviderCustomCompletionMediaView,ProviderCustomPreviousWorkView,
@@ -149,7 +149,15 @@ path('custom-requests/<uuid:request_id>/completion/',
      CustomerCustomCompletionFormView.as_view(),
      name='customer-custom-completion-form'),
 
-     
+     path('customer/messages/', CustomerAppMessageListView.as_view(), name='customer-app-messages'),
+    path('provider/messages/', ProviderAppMessageListView.as_view(), name='provider-app-messages'),
+     path('admin/messages/', AdminAppMessageListView.as_view(), name='admin-app-messages'),
+    path('admin/messages/<uuid:message_id>/', AdminAppMessageDetailView.as_view(), name='admin-app-message-detail'),
+    path('admin/onboarding/', AdminOnboardingSlideListView.as_view(), name='admin-onboarding-list'),
+    path('admin/onboarding/<uuid:slide_id>/', AdminOnboardingSlideDetailView.as_view(), name='admin-onboarding-detail'),
 ]
+
+     
+
 
 
