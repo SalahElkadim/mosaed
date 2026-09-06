@@ -15,7 +15,7 @@ from existedservices.views import _resolve_image_field  # أو تنقلها لم
 from existedservices.models import ServiceCompletionForm, CompletionMedia , Booking,PreviousWork
 from .serializers import (
     CustomRequestCreateSerializer,OnboardingSlideAdminSerializer,
-    CustomRequestUpdateSerializer,
+    CustomRequestUpdateSerializer,ConversationSerializer,
     CustomRequestListSerializer,
     CustomRequestDetailSerializer,
     CustomRequestProviderDetailSerializer,AppMessageAdminSerializer,
@@ -1776,3 +1776,71 @@ class AdminOnboardingSlideDetailView(APIView):
 
         slide.delete()
         return Response({'message': 'تم الحذف بنجاح.'}, status=status.HTTP_200_OK)
+    
+
+from django.db.models import Count, Q
+
+
+class CustomerConversationsListView(APIView):
+    """
+    GET /custom-requests/conversations/?limit=20&offset=0
+
+    بيرجع كل المحادثات (طلبات فيها فني مقبول وبدأ فيها شات) الخاصة
+    بالعميل الحالي، مرتبة من الأحدث رسالة للأقدم.
+    """
+    permission_classes = [IsCustomer]
+
+    DEFAULT_LIMIT = 20
+    MAX_LIMIT = 100
+
+    def get(self, request):
+        conversations_qs = CustomRequest.objects.filter(
+            customer=request.user,
+            accepted_provider__isnull=False,
+        ).select_related(
+            'accepted_provider', 'specialization'
+        ).prefetch_related(
+            'chat_messages'
+        ).annotate(
+            unread_count=Count(
+                'chat_messages',
+                filter=Q(chat_messages__sender_type='provider', chat_messages__is_read=False)
+            )
+        )
+
+        conversations = []
+        for obj in conversations_qs:
+            # الرسائل متجابة أصلاً بالـ prefetch ومترتبة تصاعدياً (Meta.ordering)
+            messages = list(obj.chat_messages.all())
+            if not messages:
+                continue  # مفيش شات اتبدأ لسه على الطلب ده، منعرضوش كمحادثة
+
+            obj._last_message = messages[-1]
+            conversations.append(obj)
+
+        # ترتيب حسب وقت آخر رسالة، الأحدث أولاً
+        conversations.sort(key=lambda c: c._last_message.created_at, reverse=True)
+
+        # Pagination
+        try:
+            limit = int(request.query_params.get('limit', self.DEFAULT_LIMIT))
+        except (TypeError, ValueError):
+            limit = self.DEFAULT_LIMIT
+        limit = max(1, min(limit, self.MAX_LIMIT))
+
+        try:
+            offset = int(request.query_params.get('offset', 0))
+        except (TypeError, ValueError):
+            offset = 0
+        offset = max(0, offset)
+
+        total_count = len(conversations)
+        page = conversations[offset:offset + limit]
+
+        return Response({
+            'count': total_count,
+            'limit': limit,
+            'offset': offset,
+            'has_more': offset + limit < total_count,
+            'results': ConversationSerializer(page, many=True).data,
+        }, status=status.HTTP_200_OK)

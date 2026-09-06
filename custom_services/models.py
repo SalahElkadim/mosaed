@@ -205,6 +205,13 @@ class RequestChat(models.Model):
         ('provider', 'Provider'),
     ]
 
+    MESSAGE_TYPE_CHOICES = [
+        ('text', 'Text'),
+        ('image', 'Image'),
+        ('voice', 'Voice Note'),
+        ('file', 'File'),
+    ]
+
     id          = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     request     = models.ForeignKey(
         CustomRequest,
@@ -212,10 +219,23 @@ class RequestChat(models.Model):
         related_name='chat_messages'
     )
     sender_type = models.CharField(max_length=20, choices=SENDER_TYPE_CHOICES)
-    sender_id   = models.UUIDField()    # ID العميل أو الفني
-    message     = models.TextField()
+    sender_id   = models.UUIDField()
 
-    # جديد: حالة القراءة — بتتحدث لما الطرف المستقبل يفتح شاشة الشات
+    message_type = models.CharField(
+        max_length=10, choices=MESSAGE_TYPE_CHOICES, default='text'
+    )
+    # بقت اختيارية — ممكن تبقى فاضية لو الرسالة صورة/صوت/ملف من غير كابشن
+    message = models.TextField(blank=True, null=True)
+
+    attachment_url = models.URLField(blank=True, null=True)
+    attachment_duration = models.PositiveIntegerField(
+        blank=True, null=True, help_text="مدة الرسالة الصوتية بالثواني"
+    )
+    file_name = models.CharField(max_length=255, blank=True, null=True)
+    file_size = models.PositiveIntegerField(
+        blank=True, null=True, help_text="حجم الملف بالبايت"
+    )
+
     is_read = models.BooleanField(default=False)
     read_at = models.DateTimeField(null=True, blank=True)
 
@@ -234,28 +254,18 @@ class RequestChat(models.Model):
 
     @classmethod
     def mark_as_read_for_recipient(cls, custom_request, recipient_type):
-        """
-        بتعلّم كل الرسائل اللي بعتها 'الطرف التاني' (مش recipient_type) كمقروءة.
-        مثال: لو العميل (recipient_type='customer') فتح الشات، بنعلّم رسائل الفني
-        كمقروءة (لأن الفني هو اللي بعتها والعميل هو اللي قراها).
-
-        بترجع الـ queryset اللي اتحدث (list of ids) عشان نقدر نبعتهم في إشعار الـ WebSocket.
-        """
         sender_type_to_mark = 'provider' if recipient_type == 'customer' else 'customer'
-
         unread_messages = cls.objects.filter(
             request=custom_request,
             sender_type=sender_type_to_mark,
             is_read=False,
         )
         message_ids = list(unread_messages.values_list('id', flat=True))
-
         if message_ids:
             cls.objects.filter(id__in=message_ids).update(
                 is_read=True,
                 read_at=timezone.now(),
             )
-
         return message_ids
 
 class Notification(models.Model):

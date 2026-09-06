@@ -24,7 +24,7 @@ from .views import (
     AdminPlatformSettingsView,NotificationListView,
     NotificationUnreadCountView,
     NotificationMarkReadView,
-    NotificationMarkAllReadView,
+    NotificationMarkAllReadView,CustomerConversationsListView,
     CustomerChatMarkReadView,
     ProviderChatMarkReadView,ProviderMyOffersListView,CustomerConfirmProviderArrivalCustomRequestView
 )
@@ -155,6 +155,7 @@ path('custom-requests/<uuid:request_id>/completion/',
     path('admin/messages/<uuid:message_id>/', AdminAppMessageDetailView.as_view(), name='admin-app-message-detail'),
     path('admin/onboarding/', AdminOnboardingSlideListView.as_view(), name='admin-onboarding-list'),
     path('admin/onboarding/<uuid:slide_id>/', AdminOnboardingSlideDetailView.as_view(), name='admin-onboarding-detail'),
+    path('custom-requests/conversations/', CustomerConversationsListView.as_view(), name='customer-conversations'),
 ]
 
      

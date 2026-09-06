@@ -223,17 +223,27 @@ def notify_on_new_chat_message(sender, instance, created, **kwargs):
         recipient_id = custom_request.customer_id
         group_name = customer_personal_group(custom_request.customer_id)
 
-    data = {
+        data = {
         'request_id': str(custom_request.id),
         'sender_type': instance.sender_type,
-    }
+        'message_type': instance.message_type,
+        }
 
-    _create_and_send(
-        recipient_type=recipient_type,
-        recipient_id=recipient_id,
-        event='new_chat_message',
-        title='رسالة جديدة',
-        body=instance.message[:80],
-        data=data,
-        group_name=group_name,
-    )
+        body_map = {
+            'image': '📷 صورة',
+            'voice': '🎤 رسالة صوتية',
+            'file': f'📎 {instance.file_name or "ملف"}',
+        }
+        notification_body = instance.message[:80] if instance.message else body_map.get(
+            instance.message_type, 'رسالة جديدة'
+        )
+
+        _create_and_send(
+            recipient_type=recipient_type,
+            recipient_id=recipient_id,
+            event='new_chat_message',
+            title='رسالة جديدة',
+            body=notification_body,
+            data=data,
+            group_name=group_name,
+        )

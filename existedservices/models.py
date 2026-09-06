@@ -290,4 +290,5 @@ class PreviousWork(models.Model):
         ordering     = ['-created_at']
 
     def __str__(self):
-        return f"PreviousWork for {self.service.title} — form#{self.completion_form_id}"
+        service_title = self.service.title if self.service else "خدمة محذوفة"
+        return f"PreviousWork for {service_title} — form#{self.completion_form_id}"

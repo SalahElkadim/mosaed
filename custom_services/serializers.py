@@ -315,55 +315,101 @@ class ServiceOfferAdminSerializer(serializers.ModelSerializer):
 
 class RequestChatSerializer(serializers.ModelSerializer):
     class Meta:
-        model  = RequestChat
-        fields = ['id', 'sender_type', 'sender_id', 'message', 'is_read', 'read_at', 'created_at']
-        read_only_fields = fields
+        model = RequestChat
+        fields = [
+            'id', 'request', 'sender_type', 'sender_id',
+            'message', 'message_type',
+            'attachment_url', 'attachment_duration',
+            'file_name', 'file_size',
+            'is_read', 'read_at', 'created_at',
+        ]
+
+MAX_ATTACHMENT_SIZES = {
+    'image': 10 * 1024 * 1024,   # 10MB
+    'voice': 15 * 1024 * 1024,   # 15MB
+    'file': 25 * 1024 * 1024,    # 25MB
+}
 
 
 class RequestChatCreateSerializer(serializers.Serializer):
-    message = serializers.CharField()
-
-    def validate_message(self, value):
-        if not value.strip():
-            raise serializers.ValidationError("الرسالة لا يمكن أن تكون فارغة.")
-        return value.strip()
+    message = serializers.CharField(required=False, allow_blank=True)
+    message_type = serializers.ChoiceField(
+        choices=RequestChat.MESSAGE_TYPE_CHOICES, required=False, default='text'
+    )
 
     def validate(self, attrs):
-        custom_request = self.context['custom_request']
-        user_type      = self.context['user_type']
-        user           = self.context['request'].user
+        request = self.context['request']
+        message_type = attrs.get('message_type', 'text')
+        message_text = (attrs.get('message') or '').strip()
+        attachment_file = request.FILES.get('attachment')
 
-        # الشات متاح بس بعد القبول
-        if custom_request.status not in ('accepted', 'in_progress', 'completed'):
-            raise serializers.ValidationError(
-                "الشات متاح فقط بعد قبول العرض."
-            )
-
-        # التحقق إن المتكلم هو العميل أو الفني المقبول بس
-        if user_type == 'customer':
-            if custom_request.customer_id != user.id:
-                raise serializers.ValidationError("غير مصرح.")
-        elif user_type == 'provider':
-            if custom_request.accepted_provider_id != user.id:
+        if message_type == 'text':
+            if not message_text:
+                raise serializers.ValidationError({'message': 'نص الرسالة مطلوب.'})
+        else:
+            if not attachment_file:
                 raise serializers.ValidationError(
-                    "فقط الفني المقبول يمكنه المشاركة في الشات."
+                    {'attachment': 'الملف مطلوب لهذا النوع من الرسائل.'}
                 )
 
+            max_size = MAX_ATTACHMENT_SIZES.get(message_type)
+            if max_size and attachment_file.size > max_size:
+                raise serializers.ValidationError(
+                    {'attachment': f'حجم الملف أكبر من الحد المسموح ({max_size // (1024*1024)}MB).'}
+                )
+
+            content_type = attachment_file.content_type or ''
+            if message_type == 'image' and not content_type.startswith('image/'):
+                raise serializers.ValidationError({'attachment': 'الملف المرفوع ليس صورة صالحة.'})
+            if message_type == 'voice' and not content_type.startswith('audio/'):
+                raise serializers.ValidationError({'attachment': 'الملف المرفوع ليس تسجيل صوتي صالح.'})
+
+        attrs['message_text'] = message_text
+        attrs['attachment_file'] = attachment_file
+        attrs['message_type'] = message_type
         return attrs
 
     def create(self, validated_data):
+        from utils.cloudinary import upload_image, upload_audio, upload_raw
+
+        request = self.context['request']
         custom_request = self.context['custom_request']
-        user_type      = self.context['user_type']
-        user           = self.context['request'].user
+        user_type = self.context['user_type']
+        user = request.user
+
+        message_type = validated_data['message_type']
+        message_text = validated_data['message_text']
+        attachment_file = validated_data['attachment_file']
+
+        attachment_url = None
+        attachment_duration = None
+        file_name = None
+        file_size = None
+
+        if attachment_file:
+            file_name = attachment_file.name
+            file_size = attachment_file.size
+
+            if message_type == 'image':
+                attachment_url = upload_image(attachment_file, folder="chat_attachments")
+            elif message_type == 'voice':
+                result = upload_audio(attachment_file, folder="chat_voice_notes")
+                attachment_url = result['url']
+                attachment_duration = result.get('duration')
+            elif message_type == 'file':
+                attachment_url = upload_raw(attachment_file, folder="chat_files")
 
         return RequestChat.objects.create(
             request=custom_request,
             sender_type=user_type,
             sender_id=user.id,
-            message=validated_data['message']
+            message=message_text or None,
+            message_type=message_type,
+            attachment_url=attachment_url,
+            attachment_duration=attachment_duration,
+            file_name=file_name,
+            file_size=file_size,
         )
-
-
 # ==================== STATUS UPDATE (ADMIN) ====================
 
 class CustomRequestStatusUpdateSerializer(serializers.Serializer):
@@ -586,3 +632,36 @@ class OnboardingSlideAdminSerializer(serializers.ModelSerializer):
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class ConversationSerializer(serializers.Serializer):
+    """
+    يمثل محادثة واحدة = طلب مخصص واحد له فني مقبول وفيه رسائل شات.
+    """
+    request_id = serializers.UUIDField(source='id')
+    request_title = serializers.CharField(source='title')
+    request_status = serializers.CharField(source='status')
+
+    provider_id = serializers.UUIDField(source='accepted_provider.id')
+    provider_name = serializers.CharField(source='accepted_provider.name')
+    provider_rating = serializers.DecimalField(
+        source='accepted_provider.average_rating',
+        max_digits=3, decimal_places=2, required=False
+    )
+
+    last_message = serializers.SerializerMethodField()
+    last_message_at = serializers.SerializerMethodField()
+    last_message_sender_type = serializers.SerializerMethodField()
+    unread_count = serializers.IntegerField()
+
+    def get_last_message(self, obj):
+        last = getattr(obj, '_last_message', None)
+        return last.message if last else None
+
+    def get_last_message_at(self, obj):
+        last = getattr(obj, '_last_message', None)
+        return last.created_at.isoformat() if last else None
+
+    def get_last_message_sender_type(self, obj):
+        last = getattr(obj, '_last_message', None)
+        return last.sender_type if last else None
