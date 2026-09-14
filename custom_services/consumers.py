@@ -110,6 +110,16 @@ def save_chat_message(custom_request, user, user_type, message_text):
 class ChatConsumer(AsyncWebsocketConsumer):
     """
     اتصال خاص بشات طلب واحد بالظبط — بيفتح وقت ما شاشة الشات تتفتح.
+
+    ملحوظة مهمة: الـ consumer ده بقى بيستقبل الرسايل النصية من الكلاينت
+    ويحفظها بس (save_chat_message). البث الفعلي على جروب الشات (chat.message)
+    بقى مسؤولية الـ post_save signal في signals.py (notify_on_new_chat_message)
+    بدل ما يتعمل هنا كمان. ده عشان:
+      1) نضمن مصدر واحد بس للبث، فمفيش تكرار للرسالة عند العميل/الفني.
+      2) نفس المسار بيشتغل مع الرسايل اللي بتيجي عن طريق REST API (صور،
+         تسجيلات صوتية، ملفات) والرسايل النصية اللي بتيجي عن طريق الـ
+         WebSocket هنا — فالصور والريكوردات بقت بتظهر فورًا زي الرسايل
+         العادية بالظبط، من غير الحاجة لتحديث الصفحة.
     """
 
     async def connect(self):
@@ -135,7 +145,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
     async def disconnect(self, close_code):
         if hasattr(self, 'group_name'):
             await self.channel_layer.group_discard(self.group_name, self.channel_name)
-            
+
     async def chat_read(self, event):
         await self.send(text_data=json.dumps(event['payload']))
 
@@ -158,24 +168,14 @@ class ChatConsumer(AsyncWebsocketConsumer):
         if custom_request is None:
             return
 
-        chat_message = await save_chat_message(
+        # الحفظ بس هنا. الـ post_save signal (في signals.py) هو اللي
+        # هيتولى بث الرسالة لكل المتصلين بجروب الشات، بما فيهم المتصل ده نفسه.
+        await save_chat_message(
             custom_request, user, user_type, message_text
         )
 
-        await self.channel_layer.group_send(
-            self.group_name,
-            {
-                'type': 'chat.message',
-                'payload': {
-                    'id': str(chat_message.id),
-                    'sender_type': user_type,
-                    'sender_id': str(user.id),
-                    'message': message_text,
-                    'created_at': chat_message.created_at.isoformat(),
-                }
-            }
-        )
-
     # ---- الـ handler اللي بيتنادى لما حد يعمل group_send بنوع "chat.message" ----
+    # (النداء بيجي دلوقتي من signals.py بس، سواء الرسالة اتبعتت عن طريق
+    # الـ WebSocket ده أو عن طريق REST API)
     async def chat_message(self, event):
         await self.send(text_data=json.dumps(event['payload']))

@@ -11,12 +11,13 @@ from .models import (
     CustomRequest, ServiceOffer, RequestChat,Notification,
     PlatformSettings,DeviceToken,CustomRequestImage
 )
+
 from existedservices.views import _resolve_image_field  # أو تنقلها لملف utils مشترك
 from existedservices.models import ServiceCompletionForm, CompletionMedia , Booking,PreviousWork
 from .serializers import (
     CustomRequestCreateSerializer,OnboardingSlideAdminSerializer,
-    CustomRequestUpdateSerializer,ConversationSerializer,
-    CustomRequestListSerializer,
+    CustomRequestUpdateSerializer,ConversationSerializer,CustomRequestProviderListSerializer,
+    CustomRequestListSerializer,ProviderConversationSerializer,
     CustomRequestDetailSerializer,
     CustomRequestProviderDetailSerializer,AppMessageAdminSerializer,
     CustomRequestAdminSerializer,
@@ -586,7 +587,7 @@ class ProviderCustomRequestListView(APIView):
             specialization=provider.specialization,
             address__lat__isnull=False,
             address__lng__isnull=False,
-        ).select_related('specialization', 'address')
+        ).select_related('specialization', 'address', 'customer') 
 
         # Lazy expiry أول حاجة
         for req in candidates:
@@ -598,7 +599,7 @@ class ProviderCustomRequestListView(APIView):
             specialization=provider.specialization,
             address__lat__isnull=False,
             address__lng__isnull=False,
-        ).select_related('specialization', 'address').prefetch_related('offers')
+        ).select_related('specialization', 'address', 'customer').prefetch_related('offers')
 
         # فلترة بالمسافة (مينفعش تتعمل في queryset filter عادي، بنعملها في بايثون)
         nearby_requests = [
@@ -610,7 +611,7 @@ class ProviderCustomRequestListView(APIView):
         ]
 
         return Response(
-            CustomRequestListSerializer(nearby_requests, many=True).data,
+            CustomRequestProviderListSerializer(nearby_requests, many=True).data,
             status=status.HTTP_200_OK
         )
 
@@ -632,7 +633,7 @@ class ProviderCustomRequestDetailView(APIView):
             )
 
         try:
-            obj = CustomRequest.objects.select_related('specialization', 'address').get(
+            obj = CustomRequest.objects.select_related('specialization', 'address', 'customer').get(
                 id=request_id,
                 specialization=provider.specialization,
             )
@@ -802,7 +803,6 @@ class ProviderChatMarkReadView(APIView):
             status=status.HTTP_200_OK
         )
 # ==================== PROVIDER - COMPLETION FORM ====================
-
 class ProviderCustomCompletionFormView(APIView):
     """
     GET   /provider/custom-requests/<id>/completion/
@@ -815,14 +815,18 @@ class ProviderCustomCompletionFormView(APIView):
         try:
             if user_type == 'admin':
                 return ServiceCompletionForm.objects.select_related(
-                    'payment_request'
-                ).get(
+                    'payment_request',
+                    'custom_request__accepted_provider',
+                    'booking__provider'
+                ).prefetch_related('custom_request__images').get(   # ← إضافة prefetch_related
                     custom_request__id=request_id
                 )
             else:
                 return ServiceCompletionForm.objects.select_related(
-                    'payment_request'
-                ).get(
+                    'payment_request',
+                    'custom_request__accepted_provider',
+                    'booking__provider'
+                ).prefetch_related('custom_request__images').get(   # ← إضافة prefetch_related
                     custom_request__id=request_id,
                     custom_request__accepted_provider=request.user
                 )
@@ -866,7 +870,6 @@ class ProviderCustomCompletionFormView(APIView):
             ServiceCompletionFormSerializer(updated_form).data,
             status=status.HTTP_200_OK
         )
-
 
 class ProviderCustomCompletionMediaView(APIView):
     """
@@ -1518,6 +1521,7 @@ class ProviderCustomPreviousWorkView(APIView):
         return Response({'message': 'Previous work deleted successfully.'})
     
 
+
 class ProviderCustomCompletionFormListView(APIView):
     permission_classes = [IsProvider]
 
@@ -1531,7 +1535,7 @@ class ProviderCustomCompletionFormListView(APIView):
             'custom_request',
             'custom_request__specialization',
             'custom_request__address',
-            'payment_request',  # ← جديد — يمنع query إضافي لكل عنصر في اللستة
+            'payment_request',
         ).order_by('-created_at')
 
         if is_finished_param == 'true':
@@ -1540,9 +1544,12 @@ class ProviderCustomCompletionFormListView(APIView):
             forms = forms.filter(is_finished=False)
 
         return Response(
-            ProviderCustomCompletionFormListSerializer(forms, many=True).data,
+            ProviderCustomCompletionFormListSerializer(
+                forms, many=True, context={'request': request}
+            ).data,
             status=status.HTTP_200_OK
         )
+
 
 class CustomerCustomCompletionFormView(APIView):
     """
@@ -1553,7 +1560,11 @@ class CustomerCustomCompletionFormView(APIView):
 
     def get(self, request, request_id):
         try:
-            form = ServiceCompletionForm.objects.select_related('payment_request').get(
+            form = ServiceCompletionForm.objects.select_related(
+                'payment_request',
+                'custom_request__accepted_provider',
+                'booking__provider'
+            ).prefetch_related('custom_request__images').get(   # ← إضافة prefetch_related
                 custom_request__id=request_id,
                 custom_request__customer=request.user
             )
@@ -1843,4 +1854,65 @@ class CustomerConversationsListView(APIView):
             'offset': offset,
             'has_more': offset + limit < total_count,
             'results': ConversationSerializer(page, many=True).data,
+        }, status=status.HTTP_200_OK)
+    
+
+class ProviderConversationsListView(APIView):
+    """
+    GET /provider/custom-requests/conversations/?limit=20&offset=0
+
+    بيرجع كل المحادثات (طلبات قبلها الفني وبدأ فيها شات) الخاصة
+    بالفني الحالي، مرتبة من الأحدث رسالة للأقدم.
+    """
+    permission_classes = [IsProvider, IsProviderNotBlocked]
+
+    DEFAULT_LIMIT = 20
+    MAX_LIMIT = 100
+
+    def get(self, request):
+        conversations_qs = CustomRequest.objects.filter(
+            accepted_provider=request.user,
+        ).select_related(
+            'customer', 'specialization'
+        ).prefetch_related(
+            'chat_messages'
+        ).annotate(
+            unread_count=Count(
+                'chat_messages',
+                filter=Q(chat_messages__sender_type='customer', chat_messages__is_read=False)
+            )
+        )
+
+        conversations = []
+        for obj in conversations_qs:
+            messages = list(obj.chat_messages.all())
+            if not messages:
+                continue  # مفيش شات اتبدأ لسه على الطلب ده
+
+            obj._last_message = messages[-1]
+            conversations.append(obj)
+
+        conversations.sort(key=lambda c: c._last_message.created_at, reverse=True)
+
+        try:
+            limit = int(request.query_params.get('limit', self.DEFAULT_LIMIT))
+        except (TypeError, ValueError):
+            limit = self.DEFAULT_LIMIT
+        limit = max(1, min(limit, self.MAX_LIMIT))
+
+        try:
+            offset = int(request.query_params.get('offset', 0))
+        except (TypeError, ValueError):
+            offset = 0
+        offset = max(0, offset)
+
+        total_count = len(conversations)
+        page = conversations[offset:offset + limit]
+
+        return Response({
+            'count': total_count,
+            'limit': limit,
+            'offset': offset,
+            'has_more': offset + limit < total_count,
+            'results': ProviderConversationSerializer(page, many=True).data,
         }, status=status.HTTP_200_OK)

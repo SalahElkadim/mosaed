@@ -161,9 +161,9 @@ class Customer(AbstractBaseUser):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=255)
     phone_number = models.CharField(max_length=20, unique=True)
-    email = models.EmailField(unique=True, null=True, blank=True)  # اختياري
+    email = models.EmailField(unique=True, null=True, blank=True)  
+    photo = models.URLField(null=True, blank=True)
     device_token = models.CharField(max_length=255, null=True, blank=True)
-    # عشان نعرف لو رقم التليفون اتتأكد
     is_phone_verified = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -247,6 +247,7 @@ class Provider(AbstractBaseUser):
     name = models.CharField(max_length=255)
     phone_number = models.CharField(max_length=20, unique=True)
     email = models.EmailField(unique=True, null=True, blank=True)
+    photo = models.URLField(null=True, blank=True)
     device_token = models.CharField(max_length=255, null=True, blank=True)
     specialization = models.ForeignKey(
         'Specialization',
@@ -534,3 +535,35 @@ class MarketingCodeUsage(models.Model):
 
     def __str__(self):
         return f"{self.customer.name} استخدم {self.marketing_code.code} — خصم {self.discount_amount}"
+    
+
+class ProviderBankAccount(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    provider = models.ForeignKey(
+        Provider,
+        on_delete=models.CASCADE,
+        related_name='bank_accounts'
+    )
+    bank_name = models.CharField(max_length=100)
+    account_holder_name = models.CharField(max_length=255)
+    account_number = models.CharField(max_length=50)
+    iban = models.CharField(max_length=34)  # الحد الأقصى الدولي لطول الآيبان
+    is_default = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'provider_bank_accounts'
+        verbose_name = 'Provider Bank Account'
+        verbose_name_plural = 'Provider Bank Accounts'
+        ordering = ['-is_default', '-created_at']
+
+    def __str__(self):
+        return f"{self.provider.name} - {self.bank_name} - {self.account_number}"
+
+    def save(self, *args, **kwargs):
+        if self.is_default:
+            ProviderBankAccount.objects.filter(
+                provider=self.provider,
+                is_default=True
+            ).exclude(pk=self.pk).update(is_default=False)
+        super().save(*args, **kwargs)

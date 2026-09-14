@@ -17,6 +17,10 @@ class PlatformSettingsSerializer(serializers.ModelSerializer):
 
 
 
+class CustomerMiniSerializer(serializers.Serializer):
+    id    = serializers.UUIDField()
+    name  = serializers.CharField()
+    photo = serializers.URLField(allow_null=True)
 
 class CustomRequestImageSerializer(serializers.ModelSerializer):
     class Meta:
@@ -132,19 +136,35 @@ class CustomRequestListSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class AcceptedProviderMiniSerializer(serializers.Serializer):
+    id             = serializers.UUIDField()
+    name           = serializers.CharField()
+    phone_number   = serializers.CharField()
+    photo          = serializers.URLField(allow_null=True)
+    average_rating = serializers.DecimalField(max_digits=3, decimal_places=2)
+    total_reviews  = serializers.IntegerField()
 class CustomRequestDetailSerializer(serializers.ModelSerializer):
-    """تفاصيل كاملة — للعميل"""
     specialization = SpecializationSerializer(read_only=True)
     address        = CustomerAddressSerializer(read_only=True)
     offers_count   = serializers.IntegerField(source='offers.count', read_only=True)
     images = CustomRequestImageSerializer(many=True, read_only=True)
+    accepted_provider = AcceptedProviderMiniSerializer(read_only=True)  
+    accepted_offer = serializers.SerializerMethodField()   # ← الجديد
+
+    def get_accepted_offer(self, obj):
+        if obj.status in ('accepted', 'in_progress', 'completed'):
+            offer = obj.offers.filter(status='accepted').first()
+            if offer:
+                return ServiceOfferSerializer(offer).data
+        return None
+
     class Meta:
         model  = CustomRequest
         fields = [
             'id', 'title', 'description', 'images',
             'specialization', 'address',
             'scheduled_date', 'status', 'expires_at',
-            'accepted_provider', 'offers_count',
+            'accepted_provider', 'accepted_offer', 'offers_count',   
             'created_at', 'updated_at'
         ]
         read_only_fields = fields
@@ -156,8 +176,8 @@ class CustomRequestProviderDetailSerializer(serializers.ModelSerializer):
     city     = serializers.CharField(source='address.city',     read_only=True)
     region   = serializers.CharField(source='address.region',   read_only=True)
     district = serializers.CharField(source='address.district', read_only=True)
+    customer = CustomerMiniSerializer(read_only=True)          # ← جديد
 
-    # هل الفني ده عمل عرض قبل كده؟
     my_offer = serializers.SerializerMethodField()
     images = CustomRequestImageSerializer(many=True, read_only=True)
     def get_my_offer(self, obj):
@@ -172,11 +192,37 @@ class CustomRequestProviderDetailSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'title', 'description', 'images',
             'specialization', 'city', 'region', 'district',
+            'customer',                                          # ← جديد
             'scheduled_date', 'status', 'expires_at',
             'my_offer', 'created_at'
         ]
         read_only_fields = fields
 
+
+class CustomRequestProviderListSerializer(serializers.ModelSerializer):
+    """قائمة الطلبات القريبة — للفني بس، فيها بيانات العميل"""
+    specialization_name = serializers.CharField(
+        source='specialization.name', read_only=True
+    )
+    city    = serializers.CharField(source='address.city',    read_only=True)
+    region  = serializers.CharField(source='address.region',  read_only=True)
+    district = serializers.CharField(source='address.district', read_only=True)
+    offers_count = serializers.IntegerField(
+        source='offers.count', read_only=True
+    )
+    images = CustomRequestImageSerializer(many=True, read_only=True)
+    customer = CustomerMiniSerializer(read_only=True)          # ← جديد
+
+    class Meta:
+        model  = CustomRequest
+        fields = [
+            'id', 'title', 'specialization_name', 'images',
+            'city', 'region', 'district',
+            'customer',                                          # ← جديد
+            'scheduled_date', 'status', 'expires_at',
+            'offers_count', 'created_at'
+        ]
+        read_only_fields = fields
 
 class CustomRequestAdminSerializer(serializers.ModelSerializer):
     """للأدمن — كل التفاصيل"""
@@ -203,11 +249,11 @@ class CustomRequestAdminSerializer(serializers.ModelSerializer):
 
 
 # ==================== SERVICE OFFER ====================
-
 class ServiceOfferSerializer(serializers.ModelSerializer):
     """عرض واحد — للعميل يشوف العروض"""
     provider_name  = serializers.CharField(source='provider.name',         read_only=True)
     provider_phone = serializers.CharField(source='provider.phone_number', read_only=True)
+    provider_photo = serializers.URLField(source='provider.photo', read_only=True)
     average_rating = serializers.DecimalField(
         source='provider.average_rating',
         max_digits=3, decimal_places=2, read_only=True
@@ -219,9 +265,9 @@ class ServiceOfferSerializer(serializers.ModelSerializer):
     class Meta:
         model  = ServiceOffer
         fields = [
-            'id', 'provider_name', 'provider_phone',
+            'id', 'provider_name', 'provider_phone', 'provider_photo',
             'average_rating', 'total_reviews',
-            'final_price',    # العميل بيشوف السعر النهائي بس
+            'final_price',
             'note', 'status', 'created_at'
         ]
         read_only_fields = fields
@@ -295,16 +341,22 @@ class ServiceOfferCreateSerializer(serializers.Serializer):
 
         return offer
 
-
 class ServiceOfferAdminSerializer(serializers.ModelSerializer):
     """للأدمن — كل التفاصيل"""
     provider_name  = serializers.CharField(source='provider.name',         read_only=True)
     provider_phone = serializers.CharField(source='provider.phone_number', read_only=True)
+    provider_photo = serializers.URLField(source='provider.photo', read_only=True)          # ← جديد
+    average_rating = serializers.DecimalField(                                               # ← جديد
+        source='provider.average_rating',
+        max_digits=3, decimal_places=2, read_only=True
+    )
+    total_reviews  = serializers.IntegerField(source='provider.total_reviews', read_only=True)  # ← جديد
 
     class Meta:
         model  = ServiceOffer
         fields = [
-            'id', 'provider_name', 'provider_phone',
+            'id', 'provider_name', 'provider_phone', 'provider_photo',      # ← أضفت provider_photo
+            'average_rating', 'total_reviews',                              # ← أضفت الاتنين دول
             'provider_price', 'platform_fee', 'final_price',
             'note', 'status', 'created_at', 'updated_at'
         ]
@@ -533,6 +585,7 @@ class ProviderCustomCompletionFormListSerializer(serializers.Serializer):
     final_price         = serializers.SerializerMethodField()
     payment_request_id  = serializers.SerializerMethodField()  # ← جديد
     payment_status      = serializers.SerializerMethodField()  # ← جديد (مفيد للفلاتر يعرض حالة الدفع في نفس الكارت)
+    provider            = serializers.SerializerMethodField()  # ← جديد
     status              = serializers.CharField()
     is_finished         = serializers.BooleanField()
     started_at          = serializers.DateTimeField()
@@ -575,23 +628,22 @@ class ProviderCustomCompletionFormListSerializer(serializers.Serializer):
         return str(accepted_offer.final_price) if accepted_offer else None
 
     def get_payment_request_id(self, obj):
-        """
-        لو الـ completion form ده اتعمله finish بالفعل، هيكون فيه
-        PaymentRequest مربوط بيه (OneToOne). الفني محتاج الـ id ده
-        عشان ينادي confirm-cash/ لو العميل اختار الدفع كاش.
-        """
         payment_request = getattr(obj, 'payment_request', None)
         return str(payment_request.id) if payment_request else None
 
     def get_payment_status(self, obj):
-        """
-        حالة الدفع الحالية — مفيدة للفلاتر يعرض تاج/badge في الكارت
-        (مثلاً "بانتظار اختيار طريقة الدفع" أو "بانتظار تأكيد الكاش")
-        من غير ما يحتاج نداء API إضافي منفصل.
-        """
         payment_request = getattr(obj, 'payment_request', None)
         return payment_request.status if payment_request else None
-    
+
+    def get_provider(self, obj):
+        provider = self.context['request'].user
+        return {
+            'id': str(provider.id),
+            'name': provider.name,
+            'photo': provider.photo,
+            'average_rating': str(provider.average_rating),
+            'total_reviews': provider.total_reviews,
+        }
 
 
 
@@ -641,13 +693,42 @@ class ConversationSerializer(serializers.Serializer):
     request_id = serializers.UUIDField(source='id')
     request_title = serializers.CharField(source='title')
     request_status = serializers.CharField(source='status')
-
+    provider_photo = serializers.URLField(source='accepted_provider.photo', required=False)
     provider_id = serializers.UUIDField(source='accepted_provider.id')
     provider_name = serializers.CharField(source='accepted_provider.name')
     provider_rating = serializers.DecimalField(
         source='accepted_provider.average_rating',
         max_digits=3, decimal_places=2, required=False
     )
+
+    last_message = serializers.SerializerMethodField()
+    last_message_at = serializers.SerializerMethodField()
+    last_message_sender_type = serializers.SerializerMethodField()
+    unread_count = serializers.IntegerField()
+
+    def get_last_message(self, obj):
+        last = getattr(obj, '_last_message', None)
+        return last.message if last else None
+
+    def get_last_message_at(self, obj):
+        last = getattr(obj, '_last_message', None)
+        return last.created_at.isoformat() if last else None
+
+    def get_last_message_sender_type(self, obj):
+        last = getattr(obj, '_last_message', None)
+        return last.sender_type if last else None
+    
+
+class ProviderConversationSerializer(serializers.Serializer):
+    """
+    يمثل محادثة واحدة من منظور الفني = طلب مخصص واحد قبله هو، فيه رسائل شات.
+    """
+    request_id = serializers.UUIDField(source='id')
+    request_title = serializers.CharField(source='title')
+    request_status = serializers.CharField(source='status')
+    customer_photo = serializers.URLField(source='customer.photo', required=False)
+    customer_id = serializers.UUIDField(source='customer.id')
+    customer_name = serializers.CharField(source='customer.name')
 
     last_message = serializers.SerializerMethodField()
     last_message_at = serializers.SerializerMethodField()

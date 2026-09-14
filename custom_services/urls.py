@@ -5,7 +5,7 @@ from .views import (
     CustomerCustomRequestDetailView,
     CustomerCancelRequestView,
     CustomerOfferListView,
-    CustomerAcceptOfferView,
+    CustomerAcceptOfferView,ProviderConversationsListView,
     CustomerChatView,DeviceTokenView,OnboardingListView,CustomerAppMessageListView,ProviderAppMessageListView,
     # Provider
     ProviderCustomRequestListView,
@@ -156,6 +156,7 @@ path('custom-requests/<uuid:request_id>/completion/',
     path('admin/onboarding/', AdminOnboardingSlideListView.as_view(), name='admin-onboarding-list'),
     path('admin/onboarding/<uuid:slide_id>/', AdminOnboardingSlideDetailView.as_view(), name='admin-onboarding-detail'),
     path('custom-requests/conversations/', CustomerConversationsListView.as_view(), name='customer-conversations'),
+    path('provider/custom-requests/conversations/', ProviderConversationsListView.as_view(), name='provider-conversations-list'),
 ]
 
      

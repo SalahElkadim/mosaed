@@ -2,7 +2,7 @@
 
 from rest_framework import serializers
 from django.utils import timezone
-from .models import Admin, Customer, Provider,MarketingCode, MarketingCodeUsage , OTPVerification, BiometricToken, CustomerAddress,Specialization,Region,City,ProviderAddress
+from .models import Admin, Customer, ProviderBankAccount  , Provider,MarketingCode, MarketingCodeUsage , OTPVerification, BiometricToken, CustomerAddress,Specialization,Region,City,ProviderAddress
 
 
 # ==================== ADMIN ====================
@@ -43,17 +43,7 @@ class SpecializationWriteSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("This specialization already exists.")
         return value.strip()
     
-class CustomerRegisterSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Customer
-        fields = ['name', 'phone_number', 'email']  # ✅ address اتحذف
 
-    def validate_phone_number(self, value):
-        if Customer.objects.filter(phone_number=value).exists():
-            raise serializers.ValidationError("This phone number is already registered.")
-        return value
-
-# CustomerAddress بعد التعديل
 class CustomerAddressSerializer(serializers.ModelSerializer):
     city_name = serializers.CharField(source='city.name', read_only=True)
     region_name = serializers.CharField(source='region.name', read_only=True)
@@ -81,7 +71,7 @@ class CustomerSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Customer
-        fields = ['id', 'name', 'phone_number', 'email',
+        fields = ['id', 'name', 'phone_number', 'email', 'photo',
                   'addresses', 'is_phone_verified', 'created_at']
         read_only_fields = ['id', 'is_phone_verified', 'created_at']
 
@@ -89,7 +79,7 @@ class CustomerSerializer(serializers.ModelSerializer):
 class CustomerUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Customer
-        fields = ['name', 'email']  # ✅ address اتحذف
+        fields = ['name', 'email', 'photo']  # ✅ address اتحذف
 
     def validate_email(self, value):
         user = self.context['request'].user
@@ -176,7 +166,7 @@ class ProviderSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Provider
-        fields = ['id', 'name', 'phone_number', 'email', 
+        fields = ['id', 'name', 'phone_number', 'email',  'photo',
                 'specialization', 'addresses',                        # ← address القديم وعناوين جديدة
                 'total_services', 'average_rating', 'total_reviews',
                 'is_phone_verified', 'is_approved', 'is_active',
@@ -185,7 +175,7 @@ class ProviderSerializer(serializers.ModelSerializer):
 class ProviderUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Provider
-        fields = ['name', 'email', 'contract_image' ]    
+        fields = ['name', 'email', 'photo' ]    
     def validate_email(self, value):
         qs = Provider.objects.filter(email=value)
         if self.instance:
@@ -200,7 +190,7 @@ class ProviderAdminSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Provider
-        fields = ['id', 'name', 'phone_number', 'email', 
+        fields = ['id', 'name', 'phone_number', 'email',  'photo',
                   'specialization', 'addresses',                        # ← عدلناه
                   'national_id', 'commercial_registration', 'contract_image',
                   'wallet_balance', 'total_services', 'average_rating', 'total_reviews',
@@ -327,7 +317,7 @@ class CustomerAdminSerializer(serializers.ModelSerializer):
 
     class Meta:
         model  = Customer
-        fields = ['id', 'name', 'phone_number', 'email',
+        fields = ['id', 'name', 'phone_number', 'email','photo',
                   'is_phone_verified', 'is_active',
                   'addresses', 'bookings_count', 'created_at', 'last_login']
         read_only_fields = fields
@@ -434,4 +424,45 @@ class MarketingCodeUsageSerializer(serializers.ModelSerializer):
     class Meta:
         model = MarketingCodeUsage
         fields = ['id', 'customer_name', 'customer_phone', 'discount_amount', 'used_at']
+        read_only_fields = fields
+
+
+
+class ProviderBankAccountSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProviderBankAccount
+        fields = ['id', 'bank_name', 'account_holder_name',
+                  'account_number', 'iban', 'is_default', 'created_at']
+        read_only_fields = ['id', 'created_at']
+
+    def validate_iban(self, value):
+        value = value.strip().upper().replace(' ', '')
+        if len(value) < 15 or len(value) > 34 or not value.isalnum():
+            raise serializers.ValidationError("رقم الآيبان غير صحيح.")
+        return value
+
+    def validate_account_number(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("رقم الحساب مطلوب.")
+        return value
+
+    def create(self, validated_data):
+        # لو ده أول حساب بنكي للفني، خليه افتراضي تلقائيًا حتى لو مبعتش is_default
+        provider = validated_data.get('provider')
+        if provider and not ProviderBankAccount.objects.filter(provider=provider).exists():
+            validated_data['is_default'] = True
+        return ProviderBankAccount.objects.create(**validated_data)
+
+
+class ProviderBankAccountAdminSerializer(serializers.ModelSerializer):
+    """للأدمن — بيضيف اسم ورقم الفني عشان لوحة التحكم"""
+    provider_name = serializers.CharField(source='provider.name', read_only=True)
+    provider_phone = serializers.CharField(source='provider.phone_number', read_only=True)
+
+    class Meta:
+        model = ProviderBankAccount
+        fields = ['id', 'provider', 'provider_name', 'provider_phone',
+                  'bank_name', 'account_holder_name', 'account_number',
+                  'iban', 'is_default', 'created_at']
         read_only_fields = fields

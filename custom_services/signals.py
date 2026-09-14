@@ -1,4 +1,3 @@
-
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from django.db import transaction
@@ -8,17 +7,34 @@ from django.dispatch import receiver
 from .utils.geo import is_provider_within_range
 from .utils.fcm import send_push_to_tokens
 from .models import CustomRequest, ServiceOffer, RequestChat, Notification, DeviceToken
-from .consumers import provider_personal_group, customer_personal_group
+from .consumers import provider_personal_group, customer_personal_group, chat_group
 from .constants import DEFAULT_SERVICE_RADIUS_KM
 
 
 def _send_to_group(group_name, payload):
-    """بيبعت رسالة على جروب معين — sync wrapper حوالين الـ async channel layer"""
+    """بيبعت رسالة على جروب معين — sync wrapper حوالين الـ async channel layer (للإشعارات العامة)"""
     channel_layer = get_channel_layer()
     async_to_sync(channel_layer.group_send)(
         group_name,
         {
-            'type': 'notification.message',  # لازم يتطابق مع اسم الـ method في الـ Consumer
+            'type': 'notification.message',  # لازم يتطابق مع اسم الـ method في NotificationConsumer
+            'payload': payload,
+        }
+    )
+
+
+def _send_to_group_chat(group_name, payload):
+    """
+    بث رسالة الشات الكاملة لجروب الشات (chat_<request_id>).
+    بيستخدم type='chat.message' عشان يتوافق مع ChatConsumer.chat_message.
+    ده المصدر الوحيد للبث على جروب الشات — سواء الرسالة جت عن طريق
+    REST API (نص/صورة/صوت/ملف) أو أي مسار تاني بيعمل RequestChat.objects.create().
+    """
+    channel_layer = get_channel_layer()
+    async_to_sync(channel_layer.group_send)(
+        group_name,
+        {
+            'type': 'chat.message',
             'payload': payload,
         }
     )
@@ -202,7 +218,7 @@ def notify_on_offer_events(sender, instance, created, **kwargs):
         )
 
 
-# ==================== 4) رسالة شات جديدة → إشعار للطرف التاني ====================
+# ==================== 4) رسالة شات جديدة → بث فوري + إشعار للطرف التاني ====================
 
 @receiver(post_save, sender=RequestChat)
 def notify_on_new_chat_message(sender, instance, created, **kwargs):
@@ -211,7 +227,29 @@ def notify_on_new_chat_message(sender, instance, created, **kwargs):
 
     custom_request = instance.request
 
-    # حدد مين الطرف التاني (مش اللي بعت الرسالة) ومين الـ recipient
+    # ---- (أ) بث الرسالة الكاملة لجروب الشات نفسه — ده اللي بيحل مشكلة
+    # الصور/الريكوردات اللي مش بتظهر إلا بعد تحديث الصفحة. بيشتغل مع
+    # أي نوع رسالة (نص/صورة/صوت/ملف) ومع الاتنين (customer و provider)
+    # لأنه بره أي شرط بتاع sender_type. ----
+    chat_payload = {
+        'id': str(instance.id),
+        'request': str(custom_request.id),
+        'sender_type': instance.sender_type,
+        'sender_id': str(instance.sender_id),
+        'message': instance.message,
+        'message_type': instance.message_type,
+        'attachment_url': instance.attachment_url,
+        'attachment_duration': instance.attachment_duration,
+        'file_name': instance.file_name,
+        'file_size': instance.file_size,
+        'is_read': instance.is_read,
+        'created_at': instance.created_at.isoformat(),
+    }
+    transaction.on_commit(
+        lambda: _send_to_group_chat(chat_group(custom_request.id), chat_payload)
+    )
+
+    # ---- (ب) تحديد الطرف التاني (مش اللي بعت الرسالة) عشان الإشعار ----
     if instance.sender_type == 'customer':
         if not custom_request.accepted_provider_id:
             return
@@ -223,27 +261,27 @@ def notify_on_new_chat_message(sender, instance, created, **kwargs):
         recipient_id = custom_request.customer_id
         group_name = customer_personal_group(custom_request.customer_id)
 
-        data = {
+    data = {
         'request_id': str(custom_request.id),
         'sender_type': instance.sender_type,
         'message_type': instance.message_type,
-        }
+    }
 
-        body_map = {
-            'image': '📷 صورة',
-            'voice': '🎤 رسالة صوتية',
-            'file': f'📎 {instance.file_name or "ملف"}',
-        }
-        notification_body = instance.message[:80] if instance.message else body_map.get(
-            instance.message_type, 'رسالة جديدة'
-        )
+    body_map = {
+        'image': '📷 صورة',
+        'voice': '🎤 رسالة صوتية',
+        'file': f'📎 {instance.file_name or "ملف"}',
+    }
+    notification_body = instance.message[:80] if instance.message else body_map.get(
+        instance.message_type, 'رسالة جديدة'
+    )
 
-        _create_and_send(
-            recipient_type=recipient_type,
-            recipient_id=recipient_id,
-            event='new_chat_message',
-            title='رسالة جديدة',
-            body=notification_body,
-            data=data,
-            group_name=group_name,
-        )
+    _create_and_send(
+        recipient_type=recipient_type,
+        recipient_id=recipient_id,
+        event='new_chat_message',
+        title='رسالة جديدة',
+        body=notification_body,
+        data=data,
+        group_name=group_name,
+    )

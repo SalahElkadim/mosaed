@@ -10,10 +10,10 @@ from rest_framework_simplejwt.tokens import RefreshToken
 import random
 from .permissions import IsCustomerOrAdmin,IsProviderOrAdmin # Add this import at the top if not already imported
 from utils.cloudinary import upload_image, upload_video
-from .models import Admin, Customer, Provider, MarketingCode, MarketingCodeUsage ,OTPVerification, BiometricToken, CustomerAddress,ProviderAddress,City,Region
+from .models import Admin, Customer, Provider, MarketingCode, ProviderBankAccount  , MarketingCodeUsage ,OTPVerification, BiometricToken, CustomerAddress,ProviderAddress,City,Region
 from .serializers import (
     AdminLoginSerializer, AdminSerializer,MarketingCodeSerializer, MarketingCodeWriteSerializer, MarketingCodeUsageSerializer,
-    CustomerRegisterSerializer, CustomerSerializer,
+    CustomerRegisterSerializer, CustomerSerializer,ProviderBankAccountSerializer, ProviderBankAccountAdminSerializer,
     ProviderRegisterSerializer, ProviderSerializer,CustomerAdminSerializer,CitySerializer,
     SendOTPSerializer, VerifyOTPSerializer,CustomerUpdateSerializer, CityWriteSerializer, ProviderAddressSerializer,RegionWriteSerializer, ProviderUpdateSerializer,RegisterBiometricSerializer, BiometricLoginSerializer, CustomerAddressSerializer
 )
@@ -24,6 +24,45 @@ from rest_framework_simplejwt.settings import api_settings
 
 
 # ==================== Helper ====================
+
+import base64
+import uuid as uuid_lib
+from django.core.files.base import ContentFile
+
+
+from utils.cloudinary import upload_image, extract_public_id, delete_file
+
+def _resolve_photo_upload(request, folder, old_photo_url=None):
+    """
+    بيرجع Cloudinary URL لصورة البروفايل، سواء جاية multipart أو base64.
+    بيرجع None لو مفيش صورة اتبعتت.
+    لو فيه صورة قديمة وفيه صورة جديدة اترفعت بنجاح، بيمسح القديمة.
+    """
+    new_url = None
+
+    if 'photo' in request.FILES:
+        new_url = upload_image(request.FILES['photo'], folder=folder)
+    else:
+        photo_field = request.data.get('photo')
+        if photo_field and isinstance(photo_field, str) and not photo_field.startswith('http'):
+            if ';base64,' in photo_field:
+                header, photo_field = photo_field.split(';base64,', 1)
+                ext = header.split('/')[-1] if '/' in header else 'jpg'
+            else:
+                ext = 'jpg'
+            try:
+                decoded = base64.b64decode(photo_field)
+            except (TypeError, ValueError, base64.binascii.Error):
+                raise ValueError('صيغة الصورة (base64) غير صحيحة.')
+            file = ContentFile(decoded, name=f"{uuid_lib.uuid4()}.{ext}")
+            new_url = upload_image(file, folder=folder)
+
+    if new_url and old_photo_url:
+        old_public_id = extract_public_id(old_photo_url)
+        if old_public_id:
+            delete_file(old_public_id, resource_type="image")
+
+    return new_url
 
 def get_tokens_for_user(user, user_type):
     """بيعمل JWT tokens من غير ما يتقيد بـ AUTH_USER_MODEL"""
@@ -300,9 +339,19 @@ class CustomerProfileView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     def patch(self, request):
+        data = request.data.copy()
+        old_photo = request.user.photo   # ← لازم قبل أي تعديل
+        try:
+            photo_url = _resolve_photo_upload(request, folder="customer_photos", old_photo_url=old_photo)
+        except ValueError as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        if photo_url:
+            data['photo'] = photo_url
+
         serializer = CustomerUpdateSerializer(
             request.user,
-            data=request.data,
+            data=data,
             partial=True,
             context={'request': request}
         )
@@ -342,9 +391,19 @@ class ProviderProfileView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     def patch(self, request):
+        data = request.data.copy()
+        old_photo = request.user.photo   # ← لازم قبل أي تعديل
+        try:
+            photo_url = _resolve_photo_upload(request, folder="provider_photos", old_photo_url=old_photo)
+        except ValueError as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        if photo_url:
+            data['photo'] = photo_url
+
         serializer = ProviderUpdateSerializer(
             request.user,
-            data=request.data,
+            data=data,
             partial=True,
             context={'request': request}
         )
@@ -469,11 +528,21 @@ class ProviderDetailView(APIView):
         except Provider.DoesNotExist:
             return Response({'error': 'Provider not found.'}, status=status.HTTP_404_NOT_FOUND)
 
+        data = request.data.copy()
+        old_photo = provider.photo   # ← جديد
+        try:
+            photo_url = _resolve_photo_upload(request, folder="provider_photos", old_photo_url=old_photo)
+        except ValueError as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        if photo_url:
+            data['photo'] = photo_url
+
         serializer = ProviderUpdateSerializer(
             provider,
-            data=request.data,
+            data=data,
             partial=True,
-            context={'request': request}   # ← ضيف السطر ده
+            context={'request': request}
         )
         serializer.is_valid(raise_exception=True)
         serializer.save()
@@ -1438,3 +1507,134 @@ class AdminMarketingCodeUsageView(APIView):
             'code': MarketingCodeSerializer(code).data,
             'usages': MarketingCodeUsageSerializer(usages, many=True).data,
         })
+    
+
+class ProviderBankAccountView(APIView):
+    """
+    GET  /provider/bank-accounts/   ← الفني يشوف كل حساباته البنكية
+    POST /provider/bank-accounts/   ← الفني يضيف حساب بنكي جديد
+    """
+    permission_classes = [IsProvider]
+
+    def get(self, request):
+        accounts = ProviderBankAccount.objects.filter(provider=request.user)
+        return Response(
+            ProviderBankAccountSerializer(accounts, many=True).data,
+            status=status.HTTP_200_OK
+        )
+
+    def post(self, request):
+        serializer = ProviderBankAccountSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(provider=request.user)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class ProviderBankAccountDetailView(APIView):
+    """
+    GET    /provider/bank-accounts/<account_id>/   ← تفاصيل حساب
+    PATCH  /provider/bank-accounts/<account_id>/   ← تعديل حساب (وممكن تحديده كافتراضي)
+    DELETE /provider/bank-accounts/<account_id>/   ← حذف حساب
+    """
+    permission_classes = [IsProvider]
+
+    def get_object(self, request, account_id):
+        try:
+            return ProviderBankAccount.objects.get(
+                id=account_id,
+                provider=request.user   # ← مينفعش يشوف حساب فني تاني
+            )
+        except ProviderBankAccount.DoesNotExist:
+            return None
+
+    def get(self, request, account_id):
+        account = self.get_object(request, account_id)
+        if not account:
+            return Response({'error': 'الحساب البنكي غير موجود.'}, status=status.HTTP_404_NOT_FOUND)
+        return Response(ProviderBankAccountSerializer(account).data)
+
+    def patch(self, request, account_id):
+        account = self.get_object(request, account_id)
+        if not account:
+            return Response({'error': 'الحساب البنكي غير موجود.'}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = ProviderBankAccountSerializer(account, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
+
+    def delete(self, request, account_id):
+        account = self.get_object(request, account_id)
+        if not account:
+            return Response({'error': 'الحساب البنكي غير موجود.'}, status=status.HTTP_404_NOT_FOUND)
+
+        was_default = account.is_default
+        provider = account.provider
+        account.delete()
+
+        # لو الحساب المحذوف كان الافتراضي وفيه حسابات تانية، خلي أحدث واحد هو الافتراضي
+        if was_default:
+            next_account = ProviderBankAccount.objects.filter(provider=provider).first()
+            if next_account and not next_account.is_default:
+                next_account.is_default = True
+                next_account.save(update_fields=['is_default'])
+
+        return Response({'message': 'تم حذف الحساب البنكي بنجاح.'}, status=status.HTTP_204_NO_CONTENT)
+
+
+# ==================== ADMIN — PROVIDER BANK ACCOUNTS ====================
+
+class AdminProviderBankAccountView(APIView):
+    """
+    GET  /admin/providers/<provider_id>/bank-accounts/   ← الأدمن يشوف حسابات فني معين
+    POST /admin/providers/<provider_id>/bank-accounts/   ← الأدمن يضيف حساب لفني
+    """
+    permission_classes = [IsAdminUser]
+
+    def get(self, request, provider_id):
+        try:
+            provider = Provider.objects.get(id=provider_id)
+        except Provider.DoesNotExist:
+            return Response({'error': 'Provider not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        accounts = ProviderBankAccount.objects.filter(provider=provider)
+        return Response(ProviderBankAccountAdminSerializer(accounts, many=True).data)
+
+    def post(self, request, provider_id):
+        try:
+            provider = Provider.objects.get(id=provider_id)
+        except Provider.DoesNotExist:
+            return Response({'error': 'Provider not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = ProviderBankAccountSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(provider=provider)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class AdminProviderBankAccountDetailView(APIView):
+    """
+    PATCH  /admin/providers/<provider_id>/bank-accounts/<account_id>/
+    DELETE /admin/providers/<provider_id>/bank-accounts/<account_id>/
+    """
+    permission_classes = [IsAdminUser]
+
+    def patch(self, request, provider_id, account_id):
+        try:
+            account = ProviderBankAccount.objects.get(id=account_id, provider_id=provider_id)
+        except ProviderBankAccount.DoesNotExist:
+            return Response({'error': 'الحساب البنكي غير موجود.'}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = ProviderBankAccountSerializer(account, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
+
+    def delete(self, request, provider_id, account_id):
+        try:
+            account = ProviderBankAccount.objects.get(id=account_id, provider_id=provider_id)
+        except ProviderBankAccount.DoesNotExist:
+            return Response({'error': 'الحساب البنكي غير موجود.'}, status=status.HTTP_404_NOT_FOUND)
+
+        account.delete()
+        return Response({'message': 'تم حذف الحساب البنكي بنجاح.'}, status=status.HTTP_204_NO_CONTENT)

@@ -49,3 +49,28 @@ def upload_raw(file, folder="files"):
         resource_type="raw",
     )
     return result.get("secure_url")
+
+import re
+
+def extract_public_id(url, folder_hint=None):
+    """
+    بيستخرج الـ public_id من Cloudinary secure_url عشان نقدر نمسح الملف.
+    مثال: https://res.cloudinary.com/xxx/image/upload/v123456/customer_photos/abc-def.jpg
+    → public_id = customer_photos/abc-def
+    """
+    if not url:
+        return None
+    # شيل الجزء اللي قبل /upload/
+    match = re.search(r'/upload/(?:v\d+/)?(.+)\.\w+$', url)
+    if not match:
+        return None
+    return match.group(1)
+
+
+def delete_file(public_id, resource_type="image"):
+    if not public_id:
+        return
+    try:
+        cloudinary.uploader.destroy(public_id, resource_type=resource_type)
+    except Exception as e:
+        print(f"[Cloudinary] Failed to delete {public_id}: {e}")

@@ -3,13 +3,13 @@ from .views import (
     AdminLoginView,
     SendOTPView, VerifyOTPView,
     CustomerRegisterView, ProviderRegisterView,
-    LogoutView,
+    LogoutView,ProviderBankAccountView,ProviderBankAccountDetailView,AdminProviderBankAccountView,
     CustomerProfileView, ProviderProfileView,
     ProviderBlockView,AdminMarketingCodeListView, AdminMarketingCodeDetailView, AdminMarketingCodeUsageView,
     ProviderListView,
     ProviderDetailView,ProviderApproveView,RegisterBiometricView, BiometricLoginView, RevokeBiometricView,
     CustomerAddressView, CustomerAddressDetailView, ReviewCreateView,CityListView,ProviderAddressView,CityDetailView,
-    ProviderReviewsView,RegionDetailView,RegionListView,
+    ProviderReviewsView,RegionDetailView,RegionListView,AdminProviderBankAccountDetailView,
     ReviewDeleteView, ReviewUpdateView,AdminCustomerDetailView,AdminCustomerListView,ProviderAddressDetailView,
     ProviderReviewsDeleteAllView,PreviousWorkListCreateView,AdminProviderAddressDetailView, PreviousWorkDetailView,NearbyProvidersView, SpecializationListView,AdminProviderAddressView, SpecializationDetailView,
 )
@@ -71,6 +71,13 @@ urlpatterns = [
     path('admin/marketing-codes/', AdminMarketingCodeListView.as_view()),
     path('admin/marketing-codes/<uuid:code_id>/', AdminMarketingCodeDetailView.as_view()),
     path('admin/marketing-codes/<uuid:code_id>/usages/', AdminMarketingCodeUsageView.as_view()),
+    # Provider bank accounts
+    path('provider/bank-accounts/', ProviderBankAccountView.as_view(), name='provider-bank-accounts'),
+    path('provider/bank-accounts/<uuid:account_id>/', ProviderBankAccountDetailView.as_view(), name='provider-bank-account-detail'),
+
+    # Admin — manage a specific provider's bank accounts
+    path('admin/providers/<uuid:provider_id>/bank-accounts/', AdminProviderBankAccountView.as_view(), name='admin-provider-bank-accounts'),
+    path('admin/providers/<uuid:provider_id>/bank-accounts/<uuid:account_id>/', AdminProviderBankAccountDetailView.as_view(), name='admin-provider-bank-account-detail'),
 ]
     
 
