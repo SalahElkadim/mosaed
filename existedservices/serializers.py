@@ -472,6 +472,7 @@ class CompletionMediaWriteSerializer(serializers.ModelSerializer):
         return attrs
 
 
+
 class ServiceCompletionFormSerializer(serializers.ModelSerializer):
     media               = CompletionMediaSerializer(many=True, read_only=True)
     booking_id          = serializers.UUIDField(source='booking.id', read_only=True)
@@ -479,7 +480,8 @@ class ServiceCompletionFormSerializer(serializers.ModelSerializer):
     payment_request_id  = serializers.SerializerMethodField()
     payment_status      = serializers.SerializerMethodField()
     provider            = serializers.SerializerMethodField()
-    custom_request_images = serializers.SerializerMethodField()   # ← جديد
+    customer            = serializers.SerializerMethodField()   # ← جديد
+    custom_request_images = serializers.SerializerMethodField()
 
     class Meta:
         model  = ServiceCompletionForm
@@ -487,9 +489,9 @@ class ServiceCompletionFormSerializer(serializers.ModelSerializer):
             'id', 'booking_id', 'notes',
             'status', 'started_at',
             'is_finished', 'finished_at',
-            'media', 'previous_work', 'provider',
+            'media', 'previous_work', 'provider', 'customer',   # ← أضفنا customer هنا
             'payment_request_id', 'payment_status',
-            'custom_request_images',   # ← جديد
+            'custom_request_images',
             'created_at', 'updated_at'
         ]
         read_only_fields = fields
@@ -521,6 +523,25 @@ class ServiceCompletionFormSerializer(serializers.ModelSerializer):
             'total_reviews': provider.total_reviews,
         }
 
+    def get_customer(self, obj):   # ← جديد
+        customer = None
+        if obj.booking_id and obj.booking.customer_id:
+            customer = obj.booking.customer
+        else:
+            custom_request = getattr(obj, 'custom_request', None)
+            if custom_request and custom_request.customer_id:
+                customer = custom_request.customer
+
+        if not customer:
+            return None
+
+        return {
+            'id': str(customer.id),
+            'name': customer.name,
+            'phone_number': getattr(customer, 'phone_number', None),
+            'photo': getattr(customer, 'photo', None),
+        }
+
     def get_payment_request_id(self, obj):
         payment_request = getattr(obj, 'payment_request', None)
         return str(payment_request.id) if payment_request else None
@@ -529,13 +550,12 @@ class ServiceCompletionFormSerializer(serializers.ModelSerializer):
         payment_request = getattr(obj, 'payment_request', None)
         return payment_request.status if payment_request else None
 
-    def get_custom_request_images(self, obj):   # ← جديد
+    def get_custom_request_images(self, obj):
         custom_request = getattr(obj, 'custom_request', None)
         if not custom_request:
             return []
         from custom_services.serializers import CustomRequestImageSerializer
         return CustomRequestImageSerializer(custom_request.images.all(), many=True).data
-
 
 class ServiceCompletionFormUpdateSerializer(serializers.ModelSerializer):
     class Meta:
