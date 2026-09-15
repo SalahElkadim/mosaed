@@ -575,17 +575,20 @@ class ServiceOfferUpdateSerializer(serializers.Serializer):
             setattr(instance, attr, value)
         instance.save(update_fields=list(validated_data.keys()) + ['updated_at'])
         return instance
-    
+
+
 class ProviderCustomCompletionFormListSerializer(serializers.Serializer):
     id                  = serializers.UUIDField()
     request_id          = serializers.SerializerMethodField()
     request_title       = serializers.SerializerMethodField()
     specialization_name = serializers.SerializerMethodField()
     customer_address    = serializers.SerializerMethodField()
+    customer            = serializers.SerializerMethodField()
+    custom_request_images = serializers.SerializerMethodField()  # ← جديد
     final_price         = serializers.SerializerMethodField()
-    payment_request_id  = serializers.SerializerMethodField()  # ← جديد
-    payment_status      = serializers.SerializerMethodField()  # ← جديد (مفيد للفلاتر يعرض حالة الدفع في نفس الكارت)
-    provider            = serializers.SerializerMethodField()  # ← جديد
+    payment_request_id  = serializers.SerializerMethodField()
+    payment_status      = serializers.SerializerMethodField()
+    provider            = serializers.SerializerMethodField()
     status              = serializers.CharField()
     is_finished         = serializers.BooleanField()
     started_at          = serializers.DateTimeField()
@@ -621,6 +624,23 @@ class ProviderCustomCompletionFormListSerializer(serializers.Serializer):
             'lng': str(address.lng) if address.lng is not None else None,
         }
 
+    def get_customer(self, obj):
+        customer = obj.custom_request.customer if obj.custom_request else None
+        if not customer:
+            return None
+        return {
+            'id': str(customer.id),
+            'name': customer.name,
+            'phone_number': getattr(customer, 'phone_number', None),
+            'photo': getattr(customer, 'photo', None),
+        }
+
+    def get_custom_request_images(self, obj):   # ← جديد
+        if not obj.custom_request:
+            return []
+        from .serializers import CustomRequestImageSerializer  # نفس الملف أصلاً، لكن لو حابب تستورد بشكل صريح
+        return CustomRequestImageSerializer(obj.custom_request.images.all(), many=True).data
+
     def get_final_price(self, obj):
         if not obj.custom_request:
             return None
@@ -644,8 +664,6 @@ class ProviderCustomCompletionFormListSerializer(serializers.Serializer):
             'average_rating': str(provider.average_rating),
             'total_reviews': provider.total_reviews,
         }
-
-
 
 
 class OnboardingSlideSerializer(serializers.ModelSerializer):
